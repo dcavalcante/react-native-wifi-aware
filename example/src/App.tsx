@@ -1,12 +1,13 @@
 import { Text, View, StyleSheet } from 'react-native';
-import { multiply } from 'react-native-wifi-aware';
-
-const result = multiply(3, 7);
+import { getCapabilities } from 'react-native-wifi-aware';
 
 export default function App() {
+  const capabilities = getCapabilities();
+
   return (
     <View style={styles.container}>
-      <Text>Result: {result}</Text>
+      <Text>Supported: {String(capabilities.isSupported)}</Text>
+      <Text>Available: {String(capabilities.isAvailable)}</Text>
     </View>
   );
 }

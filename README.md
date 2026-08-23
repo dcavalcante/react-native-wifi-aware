@@ -18,6 +18,18 @@ npm install react-native-wifi-aware
 
 Native Android permissions supplied by the library merge into the consuming app. Platform availability remains a runtime capability question.
 
+## Initial API
+
+Stage 1 provides a synchronous Android capability snapshot. It does not attach to an Aware cluster or request dangerous runtime permissions.
+
+```ts
+import { getCapabilities } from 'react-native-wifi-aware';
+
+const { isSupported, isAvailable } = getCapabilities();
+```
+
+On Android API 24-25 and devices without Wi-Fi Aware, both fields are `false`. On API 26 and above, `isSupported` reports the hardware feature and `isAvailable` reports current service availability. Apple returns a conservative all-false snapshot until its implementation stage; that is not a hardware-support claim.
+
 ## Development
 
 ```sh
