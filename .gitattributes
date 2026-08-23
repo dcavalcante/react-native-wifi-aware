@@ -1,3 +1,6 @@
 *.pbxproj -text
 # specific for windows script files
 *.bat text eol=crlf
+
+# Unix Gradle wrapper executed by Linux CI
+example/android/gradlew text eol=lf
