@@ -16,4 +16,4 @@ adb -s <serial> shell getprop ro.build.version.sdk
 adb -s <serial> shell pm list features | findstr android.hardware.wifi.aware
 ```
 
-The generated arm64 debug APK compiled successfully and was installed/foreground-launched on the Samsung device. This is not evidence of Wi-Fi Aware runtime behavior.
+The generated arm64 debug APK compiled successfully and was installed/foreground-launched on the Samsung device. Stage 1 was then rebuilt after the library manifest declared `ACCESS_WIFI_STATE`; the merged test-app manifest and installed package both contained that permission. The physical UI displayed `Supported: true` and `Available: true` on 2026-08-22. This validates the narrow capability snapshot only—not attach, discovery, messaging, data paths, or interoperability.

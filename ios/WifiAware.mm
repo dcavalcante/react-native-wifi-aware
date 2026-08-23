@@ -1,10 +1,14 @@
 #import "WifiAware.h"
 
 @implementation WifiAware
-- (NSNumber *)multiply:(double)a b:(double)b {
-    NSNumber *result = @(a * b);
-
-    return result;
+- (NSDictionary *)getCapabilities {
+  // Stage 1 implements Android capability detection only. This conservative
+  // response keeps the shared Codegen contract buildable without claiming
+  // Apple Wi-Fi Aware hardware or runtime support.
+  return @{
+    @"isSupported": @NO,
+    @"isAvailable": @NO,
+  };
 }
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
