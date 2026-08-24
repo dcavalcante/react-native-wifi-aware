@@ -41,6 +41,24 @@ The reviewer checks that the next stage and its direct successors have coherent 
 
 Use a short-lived branch for each native roadmap stage; keep its commits logical and merge only an intentional, reviewable stage history to `main`. Documentation-only or small deterministic fixes may commit directly to `main`. Do not merge failed experiments, reachable `fixup!` commits, or provisional work presented as complete. Use a pull request when it provides a review checkpoint, and require passing CI before protecting or merging to `main`.
 
+## Physical React Native validation
+
+Before calling a development-build device test successful, verify Metro's status endpoint, configure `adb reverse tcp:8081 tcp:8081` for each USB device, launch the resolved activity, and confirm the expected rendered UI or native result. An installed APK or resumed activity alone is not a passing React Native validation. Asset-bundle builds do not use Metro; record the run mode and evidence.
+
+Before a stage with a physical interaction gate is declared ready for that gate, inspect the shipped example or test harness as a user would: every required action, observable success/failure signal, permission path, and teardown action must be accessible without off-screen or developer-only controls. Build the harness before requesting hardware; record its exact multi-device procedure in the validation plan.
+
+## Terminal execution rule
+
+For an approved implementation stage, continue until a definite PASS, a definite FAIL with its resolved cause, or a genuine external dependency. Lost command output, a missing terminal session, partial build output, background-agent timeout, or an intermediate validation failure is an unknown state to investigate and resolve—not a stopping point or progress report. Do not return control for routine build, test, install, lifecycle, or integration work.
+
+## Validation economy
+
+Use the smallest check that can answer the current question. Do not rebuild, reinstall, clean, restart Metro, or alter device setup on inference alone. A user's direct observation of the current screen is valid physical evidence; record it instead of reproducing it. Escalate from static checks to build/install/device work only when that level is necessary for the changed surface or to resolve a concrete contradiction. After one failed corrective loop, stop and re-diagnose rather than repeating the same class of command.
+
+## Stage gate record
+
+Keep one short gate record in the active plan. A gate is `PASS`, `FAIL`, `PENDING`, or `UNKNOWN`; every `PASS` names its command or physical observation. Do work in this order: implementation, automated validation, then physical validation and review. An exploratory device smoke test may happen earlier to diagnose an integration issue, but it must be labelled exploratory and cannot satisfy the physical gate. Never infer a failed build from lost output, or infer a successful runtime test from installation/activity launch alone.
+
 ## Specialist roles
 
 Invoke specialists on demand: Android or Apple API uncertainty, React Native/Expo/Codegen ambiguity, a substantive approved implementation stage, or an independent consequential review. Ecosystem searches and routine repository stewardship are root-agent responsibilities; reserve a separate history audit for a planned push.
@@ -48,6 +66,8 @@ Invoke specialists on demand: Android or Apple API uncertainty, React Native/Exp
 ## Release readiness
 
 Before calling a branch or milestone ready to push, inspect public-facing documentation against the current code, roadmap, and validation evidence; remove generator placeholders and stale claims. In unpublished history, fold reachable `fixup!` or corrective commits into their intended milestones when authorized, then report the final log and clean status without waiting for the user to discover them.
+
+Immediately before every public push, run `yarn lint` and `yarn typecheck` against the final tree and record their exit results. A formatter run or an earlier check is not evidence for a later amend. When a changed surface has a local build check, run the smallest corresponding build as well.
 
 ## Effort and escalation
 

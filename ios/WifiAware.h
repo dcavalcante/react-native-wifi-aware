@@ -1,5 +1,5 @@
 #import <WifiAwareSpec/WifiAwareSpec.h>
 
-@interface WifiAware : NSObject <NativeWifiAwareSpec>
+@interface WifiAware : NativeWifiAwareSpecBase <NativeWifiAwareSpec>
 
 @end

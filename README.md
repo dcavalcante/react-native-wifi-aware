@@ -6,7 +6,7 @@ The project uses a TypeScript TurboModule API with Kotlin on Android and an Obje
 
 ## Status
 
-The repository is intentionally early-stage. It does not yet provide attach, discovery, messaging, data-path, pairing, file-transfer, Apple runtime support, or Android-to-Apple interoperability. See the [roadmap](docs/ROADMAP.md), [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md) before relying on it.
+The repository is intentionally early-stage. Android capability snapshots plus basic attach/close and publish/subscribe discovery APIs are implemented and physically verified on two Android devices. Messaging, data paths, pairing, file transfer, Apple runtime support, and Android-to-Apple interoperability are not implemented. See the [roadmap](docs/ROADMAP.md), [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md) before relying on it.
 
 ## Installation
 
@@ -20,7 +20,7 @@ Native Android permissions supplied by the library merge into the consuming app.
 
 ## Initial API
 
-Stage 1 provides a synchronous Android capability snapshot. It does not attach to an Aware cluster or request dangerous runtime permissions.
+The current API provides a synchronous Android capability snapshot plus Android API-26+ attachment and basic discovery. Discovery needs the platform's runtime nearby-Wi-Fi permission; this library declares the relevant manifest permissions but deliberately does not prompt for them.
 
 ```ts
 import { getCapabilities } from 'react-native-wifi-aware';
@@ -28,7 +28,20 @@ import { getCapabilities } from 'react-native-wifi-aware';
 const { isSupported, isAvailable } = getCapabilities();
 ```
 
-On Android API 24-25 and devices without Wi-Fi Aware, both fields are `false`. On API 26 and above, `isSupported` reports the hardware feature and `isAvailable` reports current service availability. Apple returns a conservative all-false snapshot until its implementation stage; that is not a hardware-support claim.
+```ts
+import { attach, closeSession, subscribe, onPeerFound } from 'react-native-wifi-aware';
+
+const session = await attach();
+await subscribe(session, { serviceName: 'com.example.demo' });
+const subscription = onPeerFound(({ discoverySessionHandle, peerHandle }) => {
+  // Opaque native handles; peerHandle is scoped to discoverySessionHandle.
+});
+
+subscription.remove();
+await closeSession(session);
+```
+
+On Android API 24-25 and devices without Wi-Fi Aware, both capability fields are `false`. On API 26 and above, `isSupported` reports the hardware feature and `isAvailable` reports current service availability. Apple returns a conservative all-false snapshot and rejects the Stage 2 operations with `UNSUPPORTED` until its implementation stage; that is not a hardware-support claim.
 
 ## Development
 
