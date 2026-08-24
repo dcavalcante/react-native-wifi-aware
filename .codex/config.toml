@@ -1,0 +1,13 @@
+[agents]
+max_threads = 2
+
+[agents.android_researcher]
+config_file = "agents/android_researcher.toml"
+[agents.ios_researcher]
+config_file = "agents/ios_researcher.toml"
+[agents.rn_architect]
+config_file = "agents/rn_architect.toml"
+[agents.implementation_worker]
+config_file = "agents/implementation_worker.toml"
+[agents.reviewer]
+config_file = "agents/reviewer.toml"
