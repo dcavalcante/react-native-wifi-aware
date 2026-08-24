@@ -5,6 +5,7 @@
 | Two user-previously verified Android devices | not freshly observed | advertised support | not freshly observed | User-supplied prior verification |
 | Fresh adb observation, 2026-08-22 | — | — | — | `adb devices -l` returned no attached devices |
 | Samsung SM-M515F (`RQ8NB08QJ1B`) | Android 12 / API 31 | supported | installed and foreground-launched | Fresh adb observation, 2026-08-22 |
+| Samsung SM-X710 (`RX2W800461V`) | Android 16 / API 36 | supported | installed, launched, and subscribed during Stage 2 discovery | Fresh adb observation, 2026-08-24 |
 
 Fresh recheck when devices are connected:
 
