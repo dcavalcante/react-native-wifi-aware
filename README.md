@@ -8,10 +8,11 @@ The project uses a TypeScript TurboModule API with Kotlin on Android and an Obje
 
 The repository is intentionally early-stage. Android capability, discovery,
 follow-up messaging, and secure data paths are physically verified on two
-Android devices. Apple iOS-26 discovery/pairing code is provisional: its source
-and static checks are present, but Apple compilation, entitlement signing, and
-two-device runtime validation are deferred. File transfer and Android-to-Apple
-interoperability are not implemented. See the [roadmap](docs/ROADMAP.md),
+Android devices. Apple iOS-26 discovery, pairing, and network-connection code
+is provisional: its source and static checks are present, but Apple
+compilation, entitlement signing, and two-device runtime validation are
+deferred. File transfer and Android-to-Apple interoperability are not
+implemented. See the [roadmap](docs/ROADMAP.md),
 [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md)
 before relying on it.
 

@@ -11,8 +11,8 @@ import WiFiAware
  * system controllers never leave native code.
  */
 @objc(WifiAwareCoordinator)
-public final class WifiAwareCoordinator: NSObject {
-  private enum DiscoveryRole {
+public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
+  private enum DiscoveryRole: Equatable {
     case publisher
     case subscriber
   }
@@ -22,7 +22,7 @@ public final class WifiAwareCoordinator: NSObject {
     var discoveries = Set<String>()
   }
 
-  private final class DiscoveryRecord {
+  private final class DiscoveryRecord: @unchecked Sendable {
     let sessionHandle: String
     let role: DiscoveryRole
     let serviceName: String
@@ -38,11 +38,27 @@ public final class WifiAwareCoordinator: NSObject {
     }
   }
 
+  private final class DataPathRecord: @unchecked Sendable {
+    let discoveryHandle: String
+    let role: String
+    var terminal = false
+    var connected = false
+    var acceptedConnection = false
+    var task: Task<Void, Never>?
+    var cancelNetwork: (() -> Void)?
+
+    init(discoveryHandle: String, role: String) {
+      self.discoveryHandle = discoveryHandle
+      self.role = role
+    }
+  }
+
   @objc public static let shared = WifiAwareCoordinator()
 
   private let lock = NSLock()
   private var sessions = [String: SessionRecord]()
   private var discoveries = [String: DiscoveryRecord]()
+  private var dataPaths = [String: DataPathRecord]()
   private var eventSink: ((NSDictionary) -> Void)?
 
   @objc(setEventSink:)
@@ -181,6 +197,10 @@ public final class WifiAwareCoordinator: NSObject {
         self.observePairedDevices(for: discoveryHandle)
 
       case .subscriber:
+        guard #available(iOS 26.4, *) else {
+          reject("UNSUPPORTED", "Apple device selection requires iOS 26.4 or later", nil)
+          return
+        }
         guard let service = WASubscribableService.allServices[record.serviceName] else {
           reject("INVALID_ARGUMENT", "Service is not declared subscribable in WiFiAwareServices", nil)
           return
@@ -203,7 +223,8 @@ public final class WifiAwareCoordinator: NSObject {
           do {
             let endpoint = try await controller.endpoint
             guard let self, let record, !record.closed else { return }
-            self.registerPeer(endpoint, for: discoveryHandle, record: record)
+            guard let awareEndpoint = endpoint.wifiAware else { return }
+            self.registerPeer(awareEndpoint, for: discoveryHandle, record: record)
           } catch {
             // Cancellation is a user action, not a failed discovery session.
           }
@@ -229,11 +250,114 @@ public final class WifiAwareCoordinator: NSObject {
     resolve(nil)
   }
 
+  @objc(openDataPathWithDiscoveryHandle:peerHandle:role:passphrase:resolve:reject:)
+  public func openDataPath(
+    discoveryHandle: String,
+    peerHandle: String,
+    role: String,
+    passphrase: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    guard #available(iOS 26.0, *) else {
+      reject("UNSUPPORTED", "Wi-Fi Aware data paths require iOS 26", nil)
+      return
+    }
+    guard role == "server" || role == "client" else {
+      reject("INVALID_ARGUMENT", "Data-path role must be server or client", nil)
+      return
+    }
+    guard !passphrase.isEmpty else {
+      reject("INVALID_ARGUMENT", "A non-empty passphrase is required by the shared API", nil)
+      return
+    }
+
+    let handle = makeHandle("data-path")
+    let dataPath = DataPathRecord(discoveryHandle: discoveryHandle, role: role)
+    let peer: Any
+    let serviceName: String
+
+    lock.lock()
+    guard let discovery = discoveries[discoveryHandle] else {
+      lock.unlock()
+      reject("INVALID_HANDLE", "Unknown discovery handle", nil)
+      return
+    }
+    guard !discovery.closed else {
+      lock.unlock()
+      reject("DISCOVERY_CLOSED", "Discovery session is not live", nil)
+      return
+    }
+    guard discovery.role == (role == "server" ? .publisher : .subscriber) else {
+      lock.unlock()
+      reject("INVALID_ARGUMENT", "Server paths require publish; client paths require subscribe", nil)
+      return
+    }
+    guard let storedPeer = discovery.peers[peerHandle] else {
+      lock.unlock()
+      reject("INVALID_HANDLE", "Peer does not belong to the discovery session", nil)
+      return
+    }
+    guard !dataPaths.values.contains(where: { $0.discoveryHandle == discoveryHandle && !$0.terminal }) else {
+      lock.unlock()
+      reject("DATA_PATH_FAILED", "A data path is already active for this discovery session", nil)
+      return
+    }
+    peer = storedPeer
+    serviceName = discovery.serviceName
+    dataPaths[handle] = dataPath
+    lock.unlock()
+
+    switch (role, peer) {
+    case ("server", let device as WAPairedDevice):
+      dataPath.task = startServerDataPath(
+        handle: handle,
+        record: dataPath,
+        serviceName: serviceName,
+        device: device
+      )
+    case ("client", let endpoint as WAEndpoint):
+      dataPath.task = startClientDataPath(handle: handle, record: dataPath, endpoint: endpoint)
+    default:
+      removeUnstartedDataPath(handle, record: dataPath)
+      reject(
+        "INVALID_ARGUMENT",
+        role == "server"
+          ? "Publisher data paths require a paired-device peer from Apple pairing"
+          : "Subscriber data paths require a Wi-Fi Aware endpoint peer",
+        nil
+      )
+      return
+    }
+    resolve(handle)
+  }
+
+  @objc(closeDataPathWithHandle:resolve:reject:)
+  public func closeDataPath(
+    handle: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    lock.lock()
+    let path = dataPaths[handle]
+    lock.unlock()
+    guard let path else {
+      reject("INVALID_HANDLE", "Unknown data-path handle", nil)
+      return
+    }
+    retireDataPath(handle, record: path, state: "closed", reason: "Data path closed")
+    resolve(nil)
+  }
+
   @objc(invalidate)
   public func invalidate() {
     let records: [DiscoveryRecord]
+    let paths: [DataPathRecord]
     lock.lock()
     records = Array(discoveries.values)
+    paths = Array(dataPaths.values)
+    paths.forEach { $0.terminal = true }
+    dataPaths.removeAll()
     records.forEach {
       $0.closed = true
       $0.tasks.forEach { $0.cancel() }
@@ -244,6 +368,12 @@ public final class WifiAwareCoordinator: NSObject {
     discoveries.removeAll()
     eventSink = nil
     lock.unlock()
+
+    paths.forEach {
+      $0.task?.cancel()
+      $0.cancelNetwork?()
+      $0.cancelNetwork = nil
+    }
 
     DispatchQueue.main.async {
       records.forEach { $0.pairingController?.dismiss(animated: false) }
@@ -356,6 +486,234 @@ public final class WifiAwareCoordinator: NSObject {
     record.tasks.append(task)
   }
 
+  @available(iOS 26.0, *)
+  private func startServerDataPath(
+    handle: String,
+    record: DataPathRecord,
+    serviceName: String,
+    device: WAPairedDevice
+  ) -> Task<Void, Never> {
+    Task { [weak self, weak record] in
+      guard let service = WAPublishableService.allServices[serviceName] else {
+        self?.retireDataPath(
+          handle,
+          record: record,
+          state: "failed",
+          reason: "Publishable service is no longer declared by the host"
+        )
+        return
+      }
+
+      do {
+        let listener = try NetworkListener(
+          for: .wifiAware(.connecting(to: service, from: .selected([device]))),
+          using: { TLS() }
+        ).onStateUpdate { [weak self, weak record] _, state in
+          switch state {
+          case .failed(let error):
+            self?.retireDataPath(
+              handle,
+              record: record,
+              state: "failed",
+              reason: "Publisher listener failed: \(error)"
+            )
+          case .cancelled:
+            self?.retireDataPath(
+              handle,
+              record: record,
+              state: "lost",
+              reason: "Publisher listener was cancelled"
+            )
+          case .setup, .waiting, .ready:
+            break
+          @unknown default:
+            break
+          }
+        }
+
+        try await listener.run { [weak self, weak record] connection in
+          guard let self, let record,
+                self.bindAcceptedConnection(
+                  handle: handle,
+                  record: record,
+                  cancelNetwork: { connection.cancel() }
+                )
+          else {
+            connection.cancel()
+            return
+          }
+          connection.onStateUpdate { [weak self, weak record] _, state in
+            self?.handleConnectionState(state, handle: handle, record: record)
+          }
+        }
+      } catch is CancellationError {
+        // Explicit close, parent teardown, and module invalidation are silent
+        // after their terminal state has been recorded.
+      } catch {
+        self?.retireDataPath(
+          handle,
+          record: record,
+          state: "failed",
+          reason: "Unable to start publisher listener: \(error)"
+        )
+      }
+    }
+  }
+
+  @available(iOS 26.0, *)
+  private func startClientDataPath(
+    handle: String,
+    record: DataPathRecord,
+    endpoint: WAEndpoint
+  ) -> Task<Void, Never> {
+    Task { [weak self, weak record] in
+      let connection = NetworkConnection(to: endpoint, using: { TLS() })
+        .onStateUpdate { [weak self, weak record] _, state in
+          self?.handleConnectionState(state, handle: handle, record: record)
+        }
+      self?.setDataPathCancellation(handle, record: record, cancelNetwork: { connection.cancel() })
+      _ = connection.start()
+    }
+  }
+
+  @available(iOS 26.0, *)
+  private func handleConnectionState(
+    _ state: NetworkChannel<TLS>.State,
+    handle: String,
+    record: DataPathRecord?
+  ) {
+    switch state {
+    case .ready:
+      emitConnected(handle, record: record)
+    case .failed(let error):
+      retireDataPath(
+        handle,
+        record: record,
+        state: "failed",
+        reason: "Data-path connection failed: \(error)"
+      )
+    case .cancelled:
+      retireDataPath(
+        handle,
+        record: record,
+        state: "lost",
+        reason: "Data-path connection was cancelled"
+      )
+    case .setup, .preparing, .waiting:
+      break
+    @unknown default:
+      break
+    }
+  }
+
+  private func bindAcceptedConnection(
+    handle: String,
+    record: DataPathRecord,
+    cancelNetwork: @escaping () -> Void
+  ) -> Bool {
+    lock.lock()
+    guard dataPaths[handle] === record, !record.terminal, !record.acceptedConnection else {
+      lock.unlock()
+      return false
+    }
+    record.acceptedConnection = true
+    let previousCancel = record.cancelNetwork
+    record.cancelNetwork = {
+      previousCancel?()
+      cancelNetwork()
+    }
+    lock.unlock()
+    return true
+  }
+
+  private func setDataPathCancellation(
+    _ handle: String,
+    record: DataPathRecord?,
+    cancelNetwork: @escaping () -> Void
+  ) {
+    guard let record else { return }
+    lock.lock()
+    guard dataPaths[handle] === record, !record.terminal else {
+      lock.unlock()
+      cancelNetwork()
+      return
+    }
+    record.cancelNetwork = cancelNetwork
+    lock.unlock()
+  }
+
+  private func emitConnected(_ handle: String, record: DataPathRecord?) {
+    guard let record else { return }
+    lock.lock()
+    guard dataPaths[handle] === record, !record.terminal, !record.connected else {
+      lock.unlock()
+      return
+    }
+    record.connected = true
+    let sink = eventSink
+    lock.unlock()
+    sink?([
+      "eventName": "onDataPathState",
+      "dataPathHandle": handle,
+      "state": "connected",
+      "reason": record.role == "server" ? "Server accepted client" : "Client connected",
+    ])
+  }
+
+  private func retireDataPath(
+    _ handle: String,
+    record: DataPathRecord?,
+    state: String,
+    reason: String
+  ) {
+    guard let record else { return }
+    let task: Task<Void, Never>?
+    let cancelNetwork: (() -> Void)?
+    let sink: ((NSDictionary) -> Void)?
+    lock.lock()
+    guard dataPaths[handle] === record, !record.terminal else {
+      lock.unlock()
+      return
+    }
+    record.terminal = true
+    task = record.task
+    record.task = nil
+    cancelNetwork = record.cancelNetwork
+    record.cancelNetwork = nil
+    sink = eventSink
+    lock.unlock()
+
+    task?.cancel()
+    cancelNetwork?()
+    sink?([
+      "eventName": "onDataPathState",
+      "dataPathHandle": handle,
+      "state": state,
+      "reason": reason,
+    ])
+  }
+
+  private func closeDataPaths(for discoveryHandle: String, state: String, reason: String) {
+    lock.lock()
+    let paths = dataPaths.filter {
+      $0.value.discoveryHandle == discoveryHandle && !$0.value.terminal
+    }
+    lock.unlock()
+    paths.forEach { handle, record in
+      retireDataPath(handle, record: record, state: state, reason: reason)
+    }
+  }
+
+  private func removeUnstartedDataPath(_ handle: String, record: DataPathRecord) {
+    lock.lock()
+    guard dataPaths[handle] === record else {
+      lock.unlock()
+      return
+    }
+    dataPaths.removeValue(forKey: handle)
+    lock.unlock()
+  }
+
   private func registerPeer(_ peer: Any, for discoveryHandle: String, record: DiscoveryRecord) {
     let handle = makeHandle("peer")
     lock.lock()
@@ -380,17 +738,21 @@ public final class WifiAwareCoordinator: NSObject {
   }
 
   private func closeDiscovery(_ handle: String) {
+    let tasks: [Task<Void, Never>]
     lock.lock()
     guard let record = discoveries[handle], !record.closed else {
       lock.unlock()
       return
     }
     record.closed = true
-    record.tasks.forEach { $0.cancel() }
+    tasks = record.tasks
     record.tasks.removeAll()
     record.peers.removeAll()
     sessions[record.sessionHandle]?.discoveries.remove(handle)
     lock.unlock()
+
+    closeDataPaths(for: handle, state: "closed", reason: "Parent discovery closed")
+    tasks.forEach { $0.cancel() }
 
     DispatchQueue.main.async {
       record.pairingController?.dismiss(animated: true)

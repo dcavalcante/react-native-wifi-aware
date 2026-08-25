@@ -40,6 +40,18 @@ existing data-path contract. The Android-only example string
 `com.wifiaware.stage4` is not a portable library service identity. No
 Android↔Apple promise exists.
 
+Stage 7 provisionally maps that contract to Apple's Network framework. A
+publisher `WAPairedDevice` peer starts a `NetworkListener` restricted to that
+device; its first accepted `NetworkConnection` is the returned server path. A
+subscriber `WAEndpoint` peer starts the returned client path. Both use Apple's
+default bulk Wi-Fi Aware parameters and `TLS()` stack. The shared API keeps a
+nonempty `passphrase` because Android needs it, but Apple deliberately ignores
+that string: system pairing authenticates/encrypts the Wi-Fi link, and this
+stage neither derives nor exposes an Apple TLS-PSK. `connected`, `failed`,
+`lost`, and `closed` remain serializable events; data-path/native objects do
+not cross into JavaScript. The iOS example therefore uses pairing → publisher
+listener → subscriber client and keeps Stage-3 hello messaging Android-only.
+
 Before a cross-platform data path is exported, its shared contract must express
 the actual pairing/security mode and common transport rather than flattening a
 platform-specific credential into a universal field. The later interoperability
