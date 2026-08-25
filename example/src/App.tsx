@@ -13,12 +13,15 @@ import {
   closeDiscoverySession,
   closeSession,
   getCapabilities,
+  onMessageReceived,
   onPeerFound,
   publish,
+  sendMessage,
   subscribe,
 } from 'react-native-wifi-aware';
 
-const SERVICE_NAME = 'com.wifiaware.stage2';
+const SERVICE_NAME = 'com.wifiaware.stage3';
+const HELLO_MESSAGE = [112, 105, 110, 103];
 
 async function requestDiscoveryPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
@@ -41,6 +44,14 @@ export default function App() {
   );
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [activeDiscovery, setActiveDiscovery] = useState<string | null>(null);
+  const [lastPeer, setLastPeer] = useState<{
+    discoverySessionHandle: string;
+    peerHandle: string;
+  } | null>(null);
+  const [messageStatus, setMessageStatus] = useState(
+    'Subscribe first, then send hello to the discovered peer.'
+  );
+  const [messageLog, setMessageLog] = useState<string[]>([]);
 
   useEffect(() => {
     attach()
@@ -57,8 +68,25 @@ export default function App() {
   useEffect(() => {
     const eventSubscription = onPeerFound(
       ({ discoverySessionHandle, peerHandle }) => {
+        setLastPeer({ discoverySessionHandle, peerHandle });
         setDiscoveryStatus(
           `Peer found: ${peerHandle} in ${discoverySessionHandle}`
+        );
+      }
+    );
+    return () => eventSubscription.remove();
+  }, []);
+
+  useEffect(() => {
+    const eventSubscription = onMessageReceived(
+      ({ discoverySessionHandle, peerHandle, payload }) => {
+        setLastPeer({ discoverySessionHandle, peerHandle });
+        setMessageLog((current) => [
+          ...current,
+          `Received from ${peerHandle}: ${String.fromCharCode(...payload)}`,
+        ]);
+        setMessageStatus(
+          'Message received. This device can now send a reply to that peer.'
         );
       }
     );
@@ -85,12 +113,40 @@ export default function App() {
           : await subscribe(session, { serviceName: SERVICE_NAME });
       setActiveSession(session);
       setActiveDiscovery(discovery);
+      setLastPeer(null);
+      setMessageLog([]);
+      setMessageStatus(
+        mode === 'subscribe'
+          ? 'Waiting for a publisher peer, then send hello.'
+          : 'Waiting for subscriber hello; reply after it arrives.'
+      );
       setDiscoveryStatus(
         `${mode === 'publish' ? 'Publishing' : 'Subscribing'}: ${discovery}`
       );
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setDiscoveryStatus(`${mode} failed: ${detail}`);
+    }
+  };
+
+  const sendHello = async () => {
+    if (!lastPeer) {
+      setMessageStatus(
+        'No peer is available yet. Discover or receive a message first.'
+      );
+      return;
+    }
+    try {
+      setMessageStatus('Sending hello...');
+      await sendMessage(
+        lastPeer.discoverySessionHandle,
+        lastPeer.peerHandle,
+        HELLO_MESSAGE
+      );
+      setMessageStatus('Hello acknowledged by the peer.');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setMessageStatus(`Send failed: ${detail}`);
     }
   };
 
@@ -105,7 +161,9 @@ export default function App() {
       await closeSession(activeSession);
       setActiveDiscovery(null);
       setActiveSession(null);
+      setLastPeer(null);
       setDiscoveryStatus('Discovery and parent session closed.');
+      setMessageStatus('Message test closed.');
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setDiscoveryStatus(`Close failed: ${detail}`);
@@ -137,8 +195,20 @@ export default function App() {
         <View style={styles.button}>
           <Button title="Close test" onPress={() => void stopDiscovery()} />
         </View>
+        <View style={styles.button}>
+          <Button
+            title="Send hello to last peer"
+            onPress={() => void sendHello()}
+          />
+        </View>
       </View>
       <Text style={styles.status}>{discoveryStatus}</Text>
+      <Text style={styles.status}>{messageStatus}</Text>
+      {messageLog.map((entry, index) => (
+        <Text key={`${entry}-${index}`} style={styles.log}>
+          {entry}
+        </Text>
+      ))}
     </ScrollView>
   );
 }
@@ -147,7 +217,7 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     backgroundColor: '#101214',
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
   },
   value: {
@@ -167,5 +237,12 @@ const styles = StyleSheet.create({
   },
   button: {
     marginTop: 12,
+  },
+  log: {
+    color: '#a9d6ff',
+    fontSize: 14,
+    marginHorizontal: 24,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });

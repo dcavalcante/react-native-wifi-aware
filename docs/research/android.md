@@ -26,3 +26,9 @@ mode cannot be represented by a mandatory universal passphrase, and an Android
 hardware must be available on the device.
 
 **Inference for this library.** Serialize native state transitions, invalidate handles on close/termination/availability loss, and discard late callbacks by generation.
+
+## Stage 3 follow-up messaging
+
+**Documented.** `DiscoverySession.sendMessage(PeerHandle, int, byte[])`, `onMessageSendSucceeded`, `onMessageSendFailed`, and `onMessageReceived` are API 26. A peer must originate from the same discovery session's discovery or received-message callback; the subscriber must send first for the publisher to learn its peer. Android permits arbitrary message IDs, while each send receives exactly one success or failure callback. The payload limit is `WifiAwareManager.getCharacteristics().getMaxServiceSpecificInfoLength()`; the characteristics value can be unavailable and must be handled defensively. No additional message-specific permission is documented beyond the live discovery-session permissions. [DiscoverySession](https://developer.android.com/reference/android/net/wifi/aware/DiscoverySession#sendMessage(android.net.wifi.aware.PeerHandle,int,byte%5B%5D)) · [DiscoverySessionCallback](https://developer.android.com/reference/android/net/wifi/aware/DiscoverySessionCallback) · [Wi-Fi Aware guide](https://developer.android.com/develop/connectivity/wifi/wifi-aware#send)
+
+**Inference for this library.** Allocate unique pending IDs, validate a peer against its discovery handle, reject pending sends when their owning discovery becomes unusable, and ignore later native callbacks. Android documents no message ordering, deduplication, or retry guarantee; this initial contract promises none. Physical validation must prove subscriber ping → publisher receipt and peer acquisition → publisher pong → subscriber receipt.

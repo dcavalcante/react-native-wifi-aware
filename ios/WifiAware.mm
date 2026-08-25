@@ -42,7 +42,16 @@
 
 - (void)closeDiscoverySession:(NSString *)handle
                       resolve:(RCTPromiseResolveBlock)resolve
-                       reject:(RCTPromiseRejectBlock)reject
+                      reject:(RCTPromiseRejectBlock)reject
+{
+  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+}
+
+- (void)sendMessage:(NSString *)discoverySessionHandle
+          peerHandle:(NSString *)peerHandle
+             payload:(NSArray<NSNumber *> *)payload
+             resolve:(RCTPromiseResolveBlock)resolve
+              reject:(RCTPromiseRejectBlock)reject
 {
   reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
 }
