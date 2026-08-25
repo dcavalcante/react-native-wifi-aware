@@ -1,27 +1,35 @@
 #import "WifiAware.h"
+#import "WifiAware-Swift.h"
 
 @implementation WifiAware
+
+- (instancetype)init
+{
+  self = [super init];
+  if (self) {
+    __weak WifiAware *weakSelf = self;
+    [[WifiAwareCoordinator shared] setEventSink:^(NSDictionary *event) {
+      [weakSelf emitOnPeerFound:event];
+    }];
+  }
+  return self;
+}
+
 - (NSDictionary *)getCapabilities {
-  // Stage 1 implements Android capability detection only. This conservative
-  // response keeps the shared Codegen contract buildable without claiming
-  // Apple Wi-Fi Aware hardware or runtime support.
-  return @{
-    @"isSupported": @NO,
-    @"isAvailable": @NO,
-  };
+  return [[WifiAwareCoordinator shared] capabilities];
 }
 
 - (void)attach:(RCTPromiseResolveBlock)resolve
         reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared] attachWithResolve:resolve reject:reject];
 }
 
 - (void)closeSession:(NSString *)handle
              resolve:(RCTPromiseResolveBlock)resolve
               reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared] closeSessionWithHandle:handle resolve:resolve reject:reject];
 }
 
 - (void)publish:(NSString *)handle
@@ -29,7 +37,11 @@
         resolve:(RCTPromiseResolveBlock)resolve
          reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared]
+      publishWithSessionHandle:handle
+                   serviceName:[NSString stringWithUTF8String:options.serviceName.c_str()]
+                       resolve:resolve
+                        reject:reject];
 }
 
 - (void)subscribe:(NSString *)handle
@@ -37,14 +49,28 @@
           resolve:(RCTPromiseResolveBlock)resolve
            reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared]
+      subscribeWithSessionHandle:handle
+                     serviceName:[NSString stringWithUTF8String:options.serviceName.c_str()]
+                         resolve:resolve
+                          reject:reject];
+}
+
+- (void)presentPairing:(NSString *)handle
+               resolve:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject
+{
+  [[WifiAwareCoordinator shared]
+      presentPairingWithDiscoveryHandle:handle
+                                resolve:resolve
+                                 reject:reject];
 }
 
 - (void)closeDiscoverySession:(NSString *)handle
                       resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared] closeDiscoveryWithHandle:handle resolve:resolve reject:reject];
 }
 
 - (void)sendMessage:(NSString *)discoverySessionHandle
@@ -76,6 +102,12 @@
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {
     return std::make_shared<facebook::react::NativeWifiAwareSpecJSI>(params);
+}
+
+- (void)invalidate
+{
+  [[WifiAwareCoordinator shared] invalidate];
+  [super invalidate];
 }
 
 + (NSString *)moduleName

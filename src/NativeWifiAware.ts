@@ -31,6 +31,7 @@ export interface Spec extends TurboModule {
   closeSession(handle: string): Promise<void>;
   publish(handle: string, options: NativeDiscoveryOptions): Promise<string>;
   subscribe(handle: string, options: NativeDiscoveryOptions): Promise<string>;
+  presentPairing(handle: string): Promise<void>;
   closeDiscoverySession(handle: string): Promise<void>;
   sendMessage(
     discoverySessionHandle: string,

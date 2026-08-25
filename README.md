@@ -6,7 +6,14 @@ The project uses a TypeScript TurboModule API with Kotlin on Android and an Obje
 
 ## Status
 
-The repository is intentionally early-stage. Android capability, discovery, and small follow-up messaging APIs are physically verified on two Android devices. Secure Android data paths and native socket lifecycle are implemented and CI verified, pending their two-device connection/loss gate. Pairing, file transfer, Apple runtime support, and Android-to-Apple interoperability are not implemented. See the [roadmap](docs/ROADMAP.md), [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md) before relying on it.
+The repository is intentionally early-stage. Android capability, discovery,
+follow-up messaging, and secure data paths are physically verified on two
+Android devices. Apple iOS-26 discovery/pairing code is provisional: its source
+and static checks are present, but Apple compilation, entitlement signing, and
+two-device runtime validation are deferred. File transfer and Android-to-Apple
+interoperability are not implemented. See the [roadmap](docs/ROADMAP.md),
+[architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md)
+before relying on it.
 
 ## Installation
 
@@ -41,7 +48,16 @@ subscription.remove();
 await closeSession(session);
 ```
 
-On Android API 24-25 and devices without Wi-Fi Aware, both capability fields are `false`. On API 26 and above, `isSupported` reports the hardware feature and `isAvailable` reports current service availability. Apple returns a conservative all-false snapshot and rejects the Stage 2 operations with `UNSUPPORTED` until its implementation stage; that is not a hardware-support claim.
+On Android API 24-25 and devices without Wi-Fi Aware, both capability fields are `false`. On API 26 and above, `isSupported` reports the hardware feature and `isAvailable` reports current service availability. On Apple iOS 26+, both fields reflect Apple's supported-feature snapshot; Apple has no Android-equivalent mutable availability query, so individual operations remain authoritative. The Apple implementation has not yet passed its compiler, signing, or physical-device gates.
+
+On Apple iOS 26, the host application must add the Wi-Fi Aware capability with
+the `Publish` and/or `Subscribe` entitlement values and declare every service
+in its own `Info.plist` under `WiFiAwareServices`. Apple service names are
+static, fully-qualified `_name._tcp` or `_name._udp` values; pass that exact
+declared name to `publish` or `subscribe`. Apple rejects undeclared or
+role-mismatched names and never converts Android names. Use
+`presentPairing(discoveryHandle)` to present the system pairing UI; resolving
+only means that UI was shown, not that pairing or a connection succeeded.
 
 ## Development
 

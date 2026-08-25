@@ -18,18 +18,20 @@ import {
   onMessageReceived,
   onPeerFound,
   openDataPath,
+  presentPairing,
   publish,
   sendMessage,
   subscribe,
 } from 'react-native-wifi-aware';
 
-const SERVICE_NAME = 'com.wifiaware.stage4';
+const SERVICE_NAME =
+  Platform.OS === 'ios' ? '_rn-aware._tcp' : 'com.wifiaware.stage4';
 const HELLO_MESSAGE = [112, 105, 110, 103];
 const DATA_PATH_READY_MESSAGE = [100, 97, 116, 97, 45, 112, 97, 116, 104];
 const DATA_PATH_PASSPHRASE = 'stage4-demo-passphrase';
 
 async function requestDiscoveryPermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
+  if (Platform.OS !== 'android') return true;
 
   const permission =
     Number(Platform.Version) >= 33
@@ -220,6 +222,24 @@ export default function App() {
     }
   };
 
+  const startPairing = async () => {
+    if (!activeDiscovery) {
+      setDiscoveryStatus('Start a publish or subscribe test before pairing.');
+      return;
+    }
+    try {
+      await presentPairing(activeDiscovery);
+      setDiscoveryStatus(
+        activeMode === 'publish'
+          ? 'Apple pairing UI is open. Keep this device discoverable.'
+          : 'Apple device picker is open. Select the publisher and complete pairing.'
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setDiscoveryStatus(`Pairing UI failed: ${detail}`);
+    }
+  };
+
   const stopDataPath = async () => {
     if (!activeDataPath) {
       setDataPathStatus('No active data path to close.');
@@ -302,6 +322,14 @@ export default function App() {
             onPress={() => void startDiscovery('subscribe')}
           />
         </View>
+        {Platform.OS === 'ios' ? (
+          <View style={styles.button}>
+            <Button
+              title="Pair Apple device"
+              onPress={() => void startPairing()}
+            />
+          </View>
+        ) : null}
         <View style={styles.button}>
           <Button title="Close test" onPress={() => void stopDiscovery()} />
         </View>

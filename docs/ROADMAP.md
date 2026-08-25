@@ -14,7 +14,7 @@ A later stage may proceed from a provisional predecessor only when it can use th
 | 3 Android peer messaging | complete | Follow-up messages, errors/cancellation and peer/session lifetime | Implemented, CI verified, and physically verified on two Android devices 2026-08-24. |
 | 4 Android network connection | complete | Secure Wi-Fi Aware data path, native socket lifecycle, loss and cleanup | CI verified and physically verified on SM-M515F (API 31) and SM-X710 (API 36) 2026-08-25; final review returned READY with no BLOCKING/HIGH findings. |
 | 5 Android physical validation pass | planned | Cumulative Android regression evidence for completed provisional work | Recorded available-device matrix and regression notes; not a feature implementation milestone |
-| 6 Apple discovery foundation | planned | Capability/configuration, service declarations, pairing and browser/listener lifecycle | iOS compile; documented physical-validation debt; no runtime claim without device |
+| 6 Apple discovery foundation | provisional — compile and physical validation pending | iOS-26 capability/configuration, host-declared services, pairing, paired peers, and subscriber browser lifecycle | Source implemented; lint/typecheck passed 2026-08-25. User deferred Codegen/package/Xcode/signing/two-device gates; no runtime claim. |
 | 7 Apple network connection | planned | Network framework connection and transfer lifecycle | iOS compile; documented physical-validation debt; no runtime claim without device |
 | 8 Apple physical validation | deferred | Entitlement, pairing, discovery and connection tests | Eligible physical Apple devices |
 | 9 Cross-platform validation | deferred | Android↔Apple experiment | Explicit pairing/discovery/data-path evidence |

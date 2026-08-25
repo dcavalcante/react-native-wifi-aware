@@ -74,6 +74,12 @@ export const subscribe = (
   options: DiscoveryOptions
 ): Promise<DiscoverySessionHandle> =>
   NativeWifiAware.subscribe(handle, options);
+/**
+ * Presents the platform pairing UI for a live discovery role. Resolving means
+ * the system UI was presented; pairing and connection are asynchronous.
+ */
+export const presentPairing = (handle: DiscoverySessionHandle): Promise<void> =>
+  NativeWifiAware.presentPairing(handle);
 export const closeDiscoverySession = (
   handle: DiscoverySessionHandle
 ): Promise<void> => NativeWifiAware.closeDiscoverySession(handle);
