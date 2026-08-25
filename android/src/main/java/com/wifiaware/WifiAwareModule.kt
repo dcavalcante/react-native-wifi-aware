@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.wifi.aware.AttachCallback
 import android.net.wifi.aware.DiscoverySession
 import android.net.wifi.aware.DiscoverySessionCallback
@@ -15,6 +19,8 @@ import android.net.wifi.aware.PublishDiscoverySession
 import android.net.wifi.aware.SubscribeConfig
 import android.net.wifi.aware.SubscribeDiscoverySession
 import android.net.wifi.aware.WifiAwareManager
+import android.net.wifi.aware.WifiAwareNetworkInfo
+import android.net.wifi.aware.WifiAwareNetworkSpecifier
 import android.net.wifi.aware.WifiAwareSession
 import android.os.Build
 import android.os.Handler
@@ -29,6 +35,13 @@ import com.facebook.react.bridge.ReadableType
 import com.facebook.react.bridge.WritableMap
 import java.util.IdentityHashMap
 import java.util.UUID
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSpec(reactContext) {
   // All mutable Aware state is serialized on this handler.
@@ -36,9 +49,30 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   @RequiresApi(26) private val handles = AwareHandleRegistry<WifiAwareSession, DiscoverySession>()
   @RequiresApi(26) private val peers = mutableMapOf<String, IdentityHashMap<PeerHandle, String>>()
   @RequiresApi(26) private val pendingMessages = PendingMessageRegistry<Promise>()
+  private val socketExecutor = ThreadPoolExecutor(
+    1,
+    1,
+    0L,
+    TimeUnit.MILLISECONDS,
+    ArrayBlockingQueue(MAX_QUEUED_SOCKET_TASKS),
+    ThreadPoolExecutor.AbortPolicy(),
+  )
+  private val dataPaths = DataPathRegistry<DataPathResources>()
   private val pendingAttaches = mutableMapOf<String, Promise>()
   private val pendingDiscoveries = mutableMapOf<String, Pair<String, Promise>>()
   private var receiverRegistered = false
+
+  private data class DataPathResources(
+    val discoveryHandle: String,
+    val manager: ConnectivityManager,
+    val role: String,
+    var callback: ConnectivityManager.NetworkCallback? = null,
+    var callbackRegistered: Boolean = false,
+    var network: Network? = null,
+    var serverSocket: ServerSocket? = null,
+    var socket: Socket? = null,
+    var socketTask: Future<*>? = null,
+  )
 
   private val availabilityReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -114,6 +148,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
         }
         val (session, discoveries) = handles.closeSession(handle)
         childHandles.forEach {
+          closeDataPathsForDiscovery(it, "closed", "Parent session closed")
           rejectPendingMessagesForDiscovery(it, "SESSION_CLOSED", "Session closed before message completed")
           peers.remove(it)
         }
@@ -262,6 +297,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   @RequiresApi(26)
   private fun closeDiscovery(handle: String, closeNative: Boolean = true) {
     val record = handles.closeDiscovery(handle) ?: return
+    closeDataPathsForDiscovery(handle, "closed", "Discovery session closed")
     rejectPendingMessagesForDiscovery(handle, "DISCOVERY_CLOSED", "Discovery closed before message completed")
     peers.remove(handle)
     if (closeNative) record.value.close()
@@ -270,6 +306,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   @RequiresApi(26)
   private fun terminateDiscovery(handle: String) {
     val record = handles.closeDiscovery(handle)
+    closeDataPathsForDiscovery(handle, "closed", "Discovery session terminated")
     rejectPendingMessagesForDiscovery(handle, "DISCOVERY_CLOSED", "Discovery terminated before message completed")
     peers.remove(handle)
     if (record == null) {
@@ -356,6 +393,280 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     return bytes
   }
 
+  override fun openDataPath(
+    discoverySessionHandle: String,
+    peerHandle: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    handler.post {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        promise.reject("UNSUPPORTED", "Wi-Fi Aware data paths require API 29")
+      } else {
+        openDataPathApi29(discoverySessionHandle, peerHandle, options, promise)
+      }
+    }
+  }
+
+  @RequiresApi(29)
+  private fun openDataPathApi29(
+    discoveryHandle: String,
+    peerHandle: String,
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    if (!isAwareAvailable()) {
+      disposeNativeState("UNAVAILABLE", "Wi-Fi Aware became unavailable")
+      promise.reject("UNAVAILABLE", "Wi-Fi Aware is unavailable")
+      return
+    }
+    if (!hasDiscoveryPermission()) {
+      promise.reject("PERMISSION_DENIED", "Discovery permission is not granted")
+      return
+    }
+    val discovery = handles.discovery(discoveryHandle)?.value
+    if (discovery == null) {
+      val code = if (handles.discoveryState(discoveryHandle) == AwareHandleRegistry.HandleState.CLOSED) "DISCOVERY_CLOSED" else "INVALID_HANDLE"
+      promise.reject(code, "Discovery session is not live")
+      return
+    }
+    val peer = peers[discoveryHandle]?.entries?.firstOrNull { it.value == peerHandle }?.key
+    if (peer == null) {
+      promise.reject("INVALID_HANDLE", "Peer does not belong to this discovery session")
+      return
+    }
+    if (dataPaths.handlesForDiscovery(discoveryHandle).isNotEmpty()) {
+      promise.reject("DATA_PATH_FAILED", "A data path is already active for this discovery session")
+      return
+    }
+    val role = try { options.getString("role") } catch (_: Exception) { null }
+    val passphrase = try { options.getString("passphrase") } catch (_: Exception) { null }
+    if ((role != "server" && role != "client") || passphrase.isNullOrBlank()) {
+      promise.reject("INVALID_ARGUMENT", "Data-path options require a server/client role and non-empty passphrase")
+      return
+    }
+    if (role == "server" && discovery !is PublishDiscoverySession) {
+      promise.reject("INVALID_ARGUMENT", "The data-path server must use a publisher discovery session")
+      return
+    }
+    if (role == "client" && discovery !is SubscribeDiscoverySession) {
+      promise.reject("INVALID_ARGUMENT", "The data-path client must use a subscriber discovery session")
+      return
+    }
+    val connectivity = reactApplicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    if (connectivity == null) {
+      promise.reject("DATA_PATH_FAILED", "Connectivity Manager is unavailable")
+      return
+    }
+    val serverSocket = if (role == "server") {
+      try {
+        ServerSocket(0)
+      } catch (error: Exception) {
+        promise.reject("DATA_PATH_FAILED", "Unable to create data-path server socket", error)
+        return
+      }
+    } else {
+      null
+    }
+    val handle = newHandle("data-path")
+    val resources = DataPathResources(discoveryHandle, connectivity, role, serverSocket = serverSocket)
+    val callback = object : ConnectivityManager.NetworkCallback() {
+      override fun onAvailable(network: Network) {
+        handler.post { handleDataPathAvailable(handle, network) }
+      }
+
+      override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+        handler.post { handleDataPathCapabilities(handle, network, capabilities) }
+      }
+
+      override fun onUnavailable() {
+        handler.post { failDataPath(handle, "Network request was unavailable", callbackAlreadyReleased = true) }
+      }
+
+      override fun onLost(network: Network) {
+        handler.post { retireDataPath(handle, "lost", "Wi-Fi Aware network was lost") }
+      }
+    }
+    resources.callback = callback
+    dataPaths.begin(handle, discoveryHandle)
+    dataPaths.complete(handle, resources)
+    val request = try {
+      val specifier = WifiAwareNetworkSpecifier.Builder(discovery, peer)
+        .setPskPassphrase(passphrase)
+        .apply {
+          if (role == "server") {
+            setPort(serverSocket!!.localPort)
+            setTransportProtocol(TCP_PROTOCOL)
+          }
+        }
+        .build()
+      NetworkRequest.Builder()
+        .addTransportType(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
+        .setNetworkSpecifier(specifier)
+        .build()
+    } catch (error: IllegalArgumentException) {
+      dataPaths.close(handle)
+      closeDataPathResources(resources)
+      promise.reject("INVALID_ARGUMENT", "Invalid Wi-Fi Aware data-path options", error)
+      return
+    } catch (error: RuntimeException) {
+      dataPaths.close(handle)
+      closeDataPathResources(resources)
+      promise.reject("DATA_PATH_FAILED", "Unable to create Wi-Fi Aware network request", error)
+      return
+    }
+    try {
+      connectivity.requestNetwork(request, callback, handler, DATA_PATH_TIMEOUT_MS)
+      resources.callbackRegistered = true
+      promise.resolve(handle)
+    } catch (error: SecurityException) {
+      dataPaths.close(handle)
+      closeDataPathResources(resources)
+      promise.reject("PERMISSION_DENIED", "Missing Wi-Fi Aware network permission", error)
+    } catch (error: RuntimeException) {
+      dataPaths.close(handle)
+      closeDataPathResources(resources)
+      promise.reject("DATA_PATH_FAILED", "Unable to request Wi-Fi Aware network", error)
+    }
+  }
+
+  override fun closeDataPath(handle: String, promise: Promise) {
+    handler.post {
+      when (dataPaths.state(handle)) {
+        DataPathRegistry.HandleState.UNKNOWN -> promise.reject("INVALID_HANDLE", "Unknown data-path handle")
+        DataPathRegistry.HandleState.CLOSED -> promise.resolve(null)
+        DataPathRegistry.HandleState.LIVE -> {
+          retireDataPath(handle, "closed", "Data path closed")
+          promise.resolve(null)
+        }
+      }
+    }
+  }
+
+  @RequiresApi(29)
+  private fun handleDataPathAvailable(handle: String, network: Network) {
+    val resources = dataPaths.path(handle)?.value ?: return
+    resources.network = network
+    if (resources.role == "server") startServerAccept(handle, resources)
+  }
+
+  @RequiresApi(29)
+  private fun handleDataPathCapabilities(
+    handle: String,
+    network: Network,
+    capabilities: NetworkCapabilities,
+  ) {
+    val resources = dataPaths.path(handle)?.value ?: return
+    if (resources.role != "client" || resources.network != network || resources.socketTask != null) return
+    val peerInfo = capabilities.transportInfo as? WifiAwareNetworkInfo
+    if (peerInfo == null || peerInfo.peerIpv6Addr == null || peerInfo.port <= 0) {
+      failDataPath(handle, "Wi-Fi Aware peer address or port was unavailable")
+      return
+    }
+    try {
+      resources.socketTask = socketExecutor.submit {
+        try {
+          val socket = network.socketFactory.createSocket(peerInfo.peerIpv6Addr, peerInfo.port)
+          handler.post {
+            val active = dataPaths.path(handle)?.value
+            if (active !== resources) {
+              socket.close()
+              return@post
+            }
+            resources.socket = socket
+            resources.socketTask = null
+            emitDataPathState(handle, "connected", "Client socket connected")
+          }
+        } catch (error: Exception) {
+          handler.post { failDataPath(handle, "Unable to connect data-path socket: ${error.message}") }
+        }
+      }
+    } catch (_: RejectedExecutionException) {
+      failDataPath(handle, "Socket worker capacity was exhausted")
+    }
+  }
+
+  @RequiresApi(29)
+  private fun startServerAccept(handle: String, resources: DataPathResources) {
+    if (resources.socketTask != null) return
+    val serverSocket = resources.serverSocket ?: run {
+      failDataPath(handle, "Data-path server socket was unavailable")
+      return
+    }
+    try {
+      resources.socketTask = socketExecutor.submit {
+        try {
+          val socket = serverSocket.accept()
+          handler.post {
+            val active = dataPaths.path(handle)?.value
+            if (active !== resources) {
+              socket.close()
+              return@post
+            }
+            resources.socket = socket
+            resources.socketTask = null
+            emitDataPathState(handle, "connected", "Server socket accepted client")
+          }
+        } catch (error: Exception) {
+          if (!serverSocket.isClosed) {
+            handler.post { failDataPath(handle, "Unable to accept data-path socket: ${error.message}") }
+          }
+        }
+      }
+    } catch (_: RejectedExecutionException) {
+      failDataPath(handle, "Socket worker capacity was exhausted")
+    }
+  }
+
+  private fun failDataPath(
+    handle: String,
+    reason: String,
+    callbackAlreadyReleased: Boolean = false,
+  ) {
+    retireDataPath(handle, "failed", reason, callbackAlreadyReleased)
+  }
+
+  private fun retireDataPath(
+    handle: String,
+    state: String,
+    reason: String,
+    callbackAlreadyReleased: Boolean = false,
+  ) {
+    val resources = dataPaths.close(handle)?.value ?: return
+    closeDataPathResources(resources, callbackAlreadyReleased)
+    emitDataPathState(handle, state, reason)
+  }
+
+  private fun closeDataPathsForDiscovery(discoveryHandle: String, state: String, reason: String) {
+    dataPaths.handlesForDiscovery(discoveryHandle).forEach {
+      retireDataPath(it, state, reason)
+    }
+  }
+
+  private fun closeDataPathResources(
+    resources: DataPathResources,
+    callbackAlreadyReleased: Boolean = false,
+  ) {
+    resources.socketTask?.cancel(true)
+    resources.socketTask = null
+    try { resources.socket?.close() } catch (_: Exception) {}
+    resources.socket = null
+    try { resources.serverSocket?.close() } catch (_: Exception) {}
+    resources.serverSocket = null
+    if (resources.callbackRegistered && !callbackAlreadyReleased) {
+      try { resources.manager.unregisterNetworkCallback(resources.callback!!) } catch (_: IllegalArgumentException) {}
+    }
+    resources.callbackRegistered = false
+  }
+
+  private fun emitDataPathState(handle: String, state: String, reason: String) {
+    emitOnDataPathState(Arguments.createMap().apply {
+      putString("dataPathHandle", handle)
+      putString("state", state)
+      putString("reason", reason)
+    })
+  }
+
   @RequiresApi(26)
   private fun registerPeer(discoveryHandle: String, peer: PeerHandle): String? {
     if (handles.discoveryState(discoveryHandle) != AwareHandleRegistry.HandleState.LIVE) return null
@@ -413,11 +724,16 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     (reactApplicationContext.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager)?.isAvailable == true
 
   @RequiresApi(26)
-  private fun disposeNativeState(code: String, message: String) {
+  private fun disposeNativeState(code: String, message: String, emitDataPathEvents: Boolean = true) {
     pendingAttaches.values.forEach { it.reject(code, message) }
     pendingDiscoveries.values.forEach { it.second.reject(code, message) }
     pendingMessages.invalidate().forEach { it.value.reject(code, message) }
     pendingAttaches.clear(); pendingDiscoveries.clear()
+    if (emitDataPathEvents) {
+      dataPaths.handles().forEach { retireDataPath(it, "lost", message) }
+    } else {
+      dataPaths.invalidate().forEach { closeDataPathResources(it.value) }
+    }
     val (sessions, discoveries) = handles.invalidate()
     discoveries.forEach { it.value.close() }
     peers.clear()
@@ -426,12 +742,13 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
 
   override fun invalidate() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) handler.post {
-      disposeNativeState("INTERNAL_ERROR", "Wi-Fi Aware module was invalidated")
+      disposeNativeState("INTERNAL_ERROR", "Wi-Fi Aware module was invalidated", emitDataPathEvents = false)
     }
     if (receiverRegistered) {
       try { reactApplicationContext.unregisterReceiver(availabilityReceiver) } catch (_: IllegalArgumentException) {}
       receiverRegistered = false
     }
+    socketExecutor.shutdownNow()
     super.invalidate()
   }
 
@@ -449,5 +766,10 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     putBoolean("isAvailable", isAvailable)
   }
 
-  companion object { const val NAME = NativeWifiAwareSpec.NAME }
+  companion object {
+    const val NAME = NativeWifiAwareSpec.NAME
+    private const val DATA_PATH_TIMEOUT_MS = 30_000
+    private const val TCP_PROTOCOL = 6
+    private const val MAX_QUEUED_SOCKET_TASKS = 1
+  }
 }

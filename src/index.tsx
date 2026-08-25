@@ -1,15 +1,25 @@
 import type { EventSubscription } from 'react-native';
 import NativeWifiAware, {
-  type NativeCapabilities,
-  type NativeDiscoveryOptions,
   type NativeAwareEvent,
+  type NativeCapabilities,
+  type NativeDataPathEvent,
+  type NativeDataPathOptions,
+  type NativeDiscoveryOptions,
 } from './NativeWifiAware';
 
 export type CapabilitySnapshot = Readonly<NativeCapabilities>;
 export type AwareSessionHandle = string;
 export type DiscoverySessionHandle = string;
 export type PeerHandle = string;
+export type DataPathHandle = string;
 export type DiscoveryOptions = Readonly<NativeDiscoveryOptions>;
+export type DataPathRole = 'server' | 'client';
+export type DataPathOptions = Readonly<NativeDataPathOptions> &
+  Readonly<{ role: DataPathRole }>;
+export type DataPathState = 'connected' | 'failed' | 'lost' | 'closed';
+export type DataPathEvent = Readonly<
+  Omit<NativeDataPathEvent, 'state'> & { state: DataPathState }
+>;
 export type PeerFoundEvent = Readonly<
   Pick<NativeAwareEvent, 'discoverySessionHandle' | 'peerHandle'>
 >;
@@ -28,6 +38,8 @@ export const WIFI_AWARE_ERROR_CODES = [
   'ATTACH_FAILED',
   'DISCOVERY_FAILED',
   'MESSAGE_SEND_FAILED',
+  'DATA_PATH_FAILED',
+  'DATA_PATH_CLOSED',
   'INTERNAL_ERROR',
 ] as const;
 
@@ -76,6 +88,19 @@ export function sendMessage(
     normalizeBytePayload(payload)
   );
 }
+export function openDataPath(
+  discoverySessionHandle: DiscoverySessionHandle,
+  peerHandle: PeerHandle,
+  options: DataPathOptions
+): Promise<DataPathHandle> {
+  return NativeWifiAware.openDataPath(
+    discoverySessionHandle,
+    peerHandle,
+    normalizeDataPathOptions(options)
+  );
+}
+export const closeDataPath = (handle: DataPathHandle): Promise<void> =>
+  NativeWifiAware.closeDataPath(handle);
 export const onPeerFound = (
   listener: (event: PeerFoundEvent) => void
 ): EventSubscription =>
@@ -97,6 +122,16 @@ export const onMessageReceived = (
       payload: event.payload,
     });
   });
+export const onDataPathState = (
+  listener: (event: DataPathEvent) => void
+): EventSubscription =>
+  NativeWifiAware.onDataPathState((event) => {
+    listener({
+      dataPathHandle: event.dataPathHandle,
+      state: event.state as DataPathState,
+      reason: event.reason,
+    });
+  });
 
 function normalizeBytePayload(payload: ReadonlyArray<number>): number[] {
   if (!Array.isArray(payload)) {
@@ -116,6 +151,23 @@ function normalizeBytePayload(payload: ReadonlyArray<number>): number[] {
     );
   }
   return [...payload];
+}
+
+function normalizeDataPathOptions(
+  options: DataPathOptions
+): NativeDataPathOptions {
+  if (
+    !options ||
+    (options.role !== 'server' && options.role !== 'client') ||
+    typeof options.passphrase !== 'string' ||
+    options.passphrase.length === 0
+  ) {
+    throw wifiAwareError(
+      'INVALID_ARGUMENT',
+      'Data-path options require a server/client role and non-empty passphrase'
+    );
+  }
+  return { role: options.role, passphrase: options.passphrase };
 }
 
 function wifiAwareError(

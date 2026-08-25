@@ -6,7 +6,7 @@ The project uses a TypeScript TurboModule API with Kotlin on Android and an Obje
 
 ## Status
 
-The repository is intentionally early-stage. Android capability snapshots plus basic attach/close and publish/subscribe discovery APIs are implemented and physically verified on two Android devices. Messaging, data paths, pairing, file transfer, Apple runtime support, and Android-to-Apple interoperability are not implemented. See the [roadmap](docs/ROADMAP.md), [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md) before relying on it.
+The repository is intentionally early-stage. Android capability, discovery, and small follow-up messaging APIs are physically verified on two Android devices. Secure Android data paths and native socket lifecycle are implemented and CI verified, pending their two-device connection/loss gate. Pairing, file transfer, Apple runtime support, and Android-to-Apple interoperability are not implemented. See the [roadmap](docs/ROADMAP.md), [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md) before relying on it.
 
 ## Installation
 

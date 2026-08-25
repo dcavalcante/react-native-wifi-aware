@@ -10,18 +10,23 @@ import {
 } from 'react-native';
 import {
   attach,
+  closeDataPath,
   closeDiscoverySession,
   closeSession,
   getCapabilities,
+  onDataPathState,
   onMessageReceived,
   onPeerFound,
+  openDataPath,
   publish,
   sendMessage,
   subscribe,
 } from 'react-native-wifi-aware';
 
-const SERVICE_NAME = 'com.wifiaware.stage3';
+const SERVICE_NAME = 'com.wifiaware.stage4';
 const HELLO_MESSAGE = [112, 105, 110, 103];
+const DATA_PATH_READY_MESSAGE = [100, 97, 116, 97, 45, 112, 97, 116, 104];
+const DATA_PATH_PASSPHRASE = 'stage4-demo-passphrase';
 
 async function requestDiscoveryPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return false;
@@ -44,6 +49,9 @@ export default function App() {
   );
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [activeDiscovery, setActiveDiscovery] = useState<string | null>(null);
+  const [activeMode, setActiveMode] = useState<'publish' | 'subscribe' | null>(
+    null
+  );
   const [lastPeer, setLastPeer] = useState<{
     discoverySessionHandle: string;
     peerHandle: string;
@@ -52,6 +60,11 @@ export default function App() {
     'Subscribe first, then send hello to the discovered peer.'
   );
   const [messageLog, setMessageLog] = useState<string[]>([]);
+  const [activeDataPath, setActiveDataPath] = useState<string | null>(null);
+  const [dataPathStatus, setDataPathStatus] = useState(
+    'Exchange hello first. The publisher starts the server, then the subscriber connects.'
+  );
+  const [dataPathLog, setDataPathLog] = useState<string[]>([]);
 
   useEffect(() => {
     attach()
@@ -63,6 +76,24 @@ export default function App() {
         const detail = error instanceof Error ? error.message : String(error);
         setAttachStatus(`Attach/close: ${detail}`);
       });
+  }, []);
+
+  useEffect(() => {
+    const eventSubscription = onDataPathState(
+      ({ dataPathHandle, state, reason }) => {
+        setDataPathLog((current) => [
+          ...current,
+          `${state} ${dataPathHandle}: ${reason}`,
+        ]);
+        setDataPathStatus(`${state}: ${reason}`);
+        if (state === 'failed' || state === 'lost' || state === 'closed') {
+          setActiveDataPath((current) =>
+            current === dataPathHandle ? null : current
+          );
+        }
+      }
+    );
+    return () => eventSubscription.remove();
   }, []);
 
   useEffect(() => {
@@ -80,11 +111,17 @@ export default function App() {
   useEffect(() => {
     const eventSubscription = onMessageReceived(
       ({ discoverySessionHandle, peerHandle, payload }) => {
+        const received = String.fromCharCode(...payload);
         setLastPeer({ discoverySessionHandle, peerHandle });
         setMessageLog((current) => [
           ...current,
-          `Received from ${peerHandle}: ${String.fromCharCode(...payload)}`,
+          `Received from ${peerHandle}: ${received}`,
         ]);
+        if (received === String.fromCharCode(...DATA_PATH_READY_MESSAGE)) {
+          setDataPathStatus(
+            'Publisher server request is ready. Start the subscriber client data path.'
+          );
+        }
         setMessageStatus(
           'Message received. This device can now send a reply to that peer.'
         );
@@ -113,8 +150,16 @@ export default function App() {
           : await subscribe(session, { serviceName: SERVICE_NAME });
       setActiveSession(session);
       setActiveDiscovery(discovery);
+      setActiveMode(mode);
       setLastPeer(null);
       setMessageLog([]);
+      setActiveDataPath(null);
+      setDataPathLog([]);
+      setDataPathStatus(
+        mode === 'publish'
+          ? 'Wait for subscriber hello, then start the server data path.'
+          : 'Discover the publisher, send hello, then wait for data-path ready.'
+      );
       setMessageStatus(
         mode === 'subscribe'
           ? 'Waiting for a publisher peer, then send hello.'
@@ -126,6 +171,67 @@ export default function App() {
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setDiscoveryStatus(`${mode} failed: ${detail}`);
+    }
+  };
+
+  const startDataPath = async (role: 'server' | 'client') => {
+    const requiredMode = role === 'server' ? 'publish' : 'subscribe';
+    if (activeMode !== requiredMode) {
+      setDataPathStatus(
+        `The ${role} data path must run on the ${requiredMode} device.`
+      );
+      return;
+    }
+    if (!lastPeer) {
+      setDataPathStatus(
+        'No peer is available. Discover first; the publisher also needs subscriber hello.'
+      );
+      return;
+    }
+    if (activeDataPath) {
+      setDataPathStatus(
+        'Close the active data path before starting another one.'
+      );
+      return;
+    }
+    try {
+      setDataPathStatus(`Requesting ${role} data path...`);
+      const handle = await openDataPath(
+        lastPeer.discoverySessionHandle,
+        lastPeer.peerHandle,
+        { role, passphrase: DATA_PATH_PASSPHRASE }
+      );
+      setActiveDataPath(handle);
+      if (role === 'server') {
+        await sendMessage(
+          lastPeer.discoverySessionHandle,
+          lastPeer.peerHandle,
+          DATA_PATH_READY_MESSAGE
+        );
+        setDataPathStatus(
+          `Server request registered: ${handle}. Readiness message acknowledged.`
+        );
+      } else {
+        setDataPathStatus(`Client request registered: ${handle}.`);
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setDataPathStatus(`${role} data path failed: ${detail}`);
+    }
+  };
+
+  const stopDataPath = async () => {
+    if (!activeDataPath) {
+      setDataPathStatus('No active data path to close.');
+      return;
+    }
+    try {
+      await closeDataPath(activeDataPath);
+      setActiveDataPath(null);
+      setDataPathStatus('Data path closed.');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      setDataPathStatus(`Data-path close failed: ${detail}`);
     }
   };
 
@@ -157,13 +263,17 @@ export default function App() {
     }
 
     try {
+      if (activeDataPath) await closeDataPath(activeDataPath);
       await closeDiscoverySession(activeDiscovery);
       await closeSession(activeSession);
       setActiveDiscovery(null);
       setActiveSession(null);
+      setActiveMode(null);
       setLastPeer(null);
+      setActiveDataPath(null);
       setDiscoveryStatus('Discovery and parent session closed.');
       setMessageStatus('Message test closed.');
+      setDataPathStatus('Data-path test closed.');
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       setDiscoveryStatus(`Close failed: ${detail}`);
@@ -201,10 +311,33 @@ export default function App() {
             onPress={() => void sendHello()}
           />
         </View>
+        <View style={styles.button}>
+          <Button
+            title="Start publisher server data path"
+            onPress={() => void startDataPath('server')}
+            disabled={activeMode !== 'publish'}
+          />
+        </View>
+        <View style={styles.button}>
+          <Button
+            title="Start subscriber client data path"
+            onPress={() => void startDataPath('client')}
+            disabled={activeMode !== 'subscribe'}
+          />
+        </View>
+        <View style={styles.button}>
+          <Button title="Close data path" onPress={() => void stopDataPath()} />
+        </View>
       </View>
       <Text style={styles.status}>{discoveryStatus}</Text>
       <Text style={styles.status}>{messageStatus}</Text>
+      <Text style={styles.status}>{dataPathStatus}</Text>
       {messageLog.map((entry, index) => (
+        <Text key={`${entry}-${index}`} style={styles.log}>
+          {entry}
+        </Text>
+      ))}
+      {dataPathLog.map((entry, index) => (
         <Text key={`${entry}-${index}`} style={styles.log}>
           {entry}
         </Text>
