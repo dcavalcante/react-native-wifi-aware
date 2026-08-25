@@ -29,6 +29,8 @@ DerivedData
 *.xcuserstate
 project.xcworkspace
 **/.xcode.env.local
+example/ios/.xcode.env
+example/**/*.xcworkspace/
 
 # Android/IJ
 #
@@ -48,6 +50,8 @@ example/ios/Pods
 
 # Ruby
 example/vendor/
+example/.bundle/*
+!example/.bundle/config
 
 # node.js
 #
