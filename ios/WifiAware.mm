@@ -9,7 +9,13 @@
   if (self) {
     __weak WifiAware *weakSelf = self;
     [[WifiAwareCoordinator shared] setEventSink:^(NSDictionary *event) {
-      [weakSelf emitOnPeerFound:event];
+      NSMutableDictionary *payload = [event mutableCopy];
+      [payload removeObjectForKey:@"eventName"];
+      if ([event[@"eventName"] isEqualToString:@"onDataPathState"]) {
+        [weakSelf emitOnDataPathState:payload];
+      } else {
+        [weakSelf emitOnPeerFound:payload];
+      }
     }];
   }
   return self;
@@ -79,7 +85,7 @@
              resolve:(RCTPromiseResolveBlock)resolve
               reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  reject(@"UNSUPPORTED", @"Wi-Fi Aware messaging is not implemented on Apple platforms yet", nil);
 }
 
 - (void)openDataPath:(NSString *)discoverySessionHandle
@@ -88,14 +94,20 @@
               resolve:(RCTPromiseResolveBlock)resolve
                reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared]
+      openDataPathWithDiscoveryHandle:discoverySessionHandle
+                            peerHandle:peerHandle
+                                 role:[NSString stringWithUTF8String:options.role.c_str()]
+                           passphrase:[NSString stringWithUTF8String:options.passphrase.c_str()]
+                              resolve:resolve
+                               reject:reject];
 }
 
 - (void)closeDataPath:(NSString *)handle
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {
-  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+  [[WifiAwareCoordinator shared] closeDataPathWithHandle:handle resolve:resolve reject:reject];
 }
 
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:

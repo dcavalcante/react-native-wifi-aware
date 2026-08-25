@@ -22,4 +22,16 @@ client/server data-path API to remain explicit.
 
 Wi-Fi Aware extends Network framework: listener publishes, browser discovers, connection transfers data, and errors/path details are surfaced through Network types. Retain and cancel browsers/listeners/connections deliberately. [Connections](https://developer.apple.com/documentation/wifiaware/connecting-paired-devices)
 
+**Decision (Stage 7).** The existing shared data-path API maps a publisher's
+paired-device peer to `NetworkListener` with `.selected([device])`, and a
+subscriber browser/picker `WAEndpoint` peer to `NetworkConnection`. Both use
+Apple's default bulk data-path settings and `TLS()` example stack. Pairing
+already authenticates and encrypts the Wi-Fi link; the API's required Android
+passphrase is retained for TypeScript compatibility but is deliberately not an
+Apple PSK. A later transport stage may decide whether to derive the
+per-connection `WASharedSecret` for a real TLS-PSK or another protocol; it is
+not exposed or persisted here. The harness's Stage-3 hello/message sequence is
+Android-only; Apple's visible sequence is pairing, publisher listener, then
+subscriber client. [Connection guide](https://developer.apple.com/documentation/wifiaware/connecting-paired-devices) · [Shared secret](https://developer.apple.com/documentation/wifiaware/washaredsecret) · [Datapath defaults](https://developer.apple.com/documentation/wifiaware/wapublisherlistener/datapathparameters)
+
 **Inference.** Native operations remain behind handles; cancellation/invalidation discards late callbacks. Apple runtime and Android↔Apple testing remain deferred until eligible physical devices exist.
