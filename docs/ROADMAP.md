@@ -11,7 +11,7 @@ A later stage may proceed from a provisional predecessor only when it can use th
 | 0 Contract and feasibility | complete | Research, architecture, workflow and baseline | Docs review; Android example compile; device matrix recorded |
 | 1 Android capabilities | complete | Feature/availability snapshots with the manifest permission required by the Android API | Type/lint/package checks; Android compile; merged-manifest inspection; physical feature + availability observation |
 | 2 Android discovery foundation | complete | Attach/close lifecycle, opaque handles, publish/subscribe, peer lifetime and teardown | Implemented, CI verified, and physically verified on two Android devices 2026-08-24. |
-| 3 Android peer messaging | planned | Follow-up messages, errors/cancellation and peer/session lifetime | Message tests; two-device success/failure checks when available |
+| 3 Android peer messaging | complete | Follow-up messages, errors/cancellation and peer/session lifetime | Implemented, CI verified, and physically verified on two Android devices 2026-08-24. |
 | 4 Android network connection | planned | Wi-Fi Aware data paths, network requests, stream/socket lifetime, loss and cleanup | Network/lifecycle tests; two-device connection/loss checks when available |
 | 5 Android physical validation pass | planned | Cumulative Android regression evidence for completed provisional work | Recorded available-device matrix and regression notes; not a feature implementation milestone |
 | 6 Apple discovery foundation | planned | Capability/configuration, service declarations, pairing and browser/listener lifecycle | iOS compile; documented physical-validation debt; no runtime claim without device |

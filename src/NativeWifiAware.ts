@@ -12,9 +12,11 @@ export type NativeCapabilities = {
 };
 
 export type NativeDiscoveryOptions = { serviceName: string };
-export type NativePeerFoundEvent = {
+export type NativeAwareEvent = {
+  eventType: string;
   discoverySessionHandle: string;
   peerHandle: string;
+  payload: number[];
 };
 
 export interface Spec extends TurboModule {
@@ -24,7 +26,14 @@ export interface Spec extends TurboModule {
   publish(handle: string, options: NativeDiscoveryOptions): Promise<string>;
   subscribe(handle: string, options: NativeDiscoveryOptions): Promise<string>;
   closeDiscoverySession(handle: string): Promise<void>;
-  readonly onPeerFound: EventEmitter<NativePeerFoundEvent>;
+  sendMessage(
+    discoverySessionHandle: string,
+    peerHandle: string,
+    payload: number[]
+  ): Promise<void>;
+  // Keep the Stage-2 native event name: it is the single Codegen event stream.
+  // Public wrappers below distinguish peer discovery from received messages.
+  readonly onPeerFound: EventEmitter<NativeAwareEvent>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('WifiAware');

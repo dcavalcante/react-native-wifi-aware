@@ -23,7 +23,9 @@ import androidx.annotation.RequiresApi
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.ReadableType
 import com.facebook.react.bridge.WritableMap
 import java.util.IdentityHashMap
 import java.util.UUID
@@ -33,6 +35,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   private val handler = Handler(Looper.getMainLooper())
   @RequiresApi(26) private val handles = AwareHandleRegistry<WifiAwareSession, DiscoverySession>()
   @RequiresApi(26) private val peers = mutableMapOf<String, IdentityHashMap<PeerHandle, String>>()
+  @RequiresApi(26) private val pendingMessages = PendingMessageRegistry<Promise>()
   private val pendingAttaches = mutableMapOf<String, Promise>()
   private val pendingDiscoveries = mutableMapOf<String, Pair<String, Promise>>()
   private var receiverRegistered = false
@@ -110,7 +113,10 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
           pendingDiscoveries.remove(it)?.second?.reject("SESSION_CLOSED", "Session closed before discovery started")
         }
         val (session, discoveries) = handles.closeSession(handle)
-        childHandles.forEach { peers.remove(it) }
+        childHandles.forEach {
+          rejectPendingMessagesForDiscovery(it, "SESSION_CLOSED", "Session closed before message completed")
+          peers.remove(it)
+        }
         discoveries.forEach { it.value.close() }
         session?.close()
         promise.resolve(null)
@@ -171,11 +177,38 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
       override fun onServiceDiscovered(peer: PeerHandle, info: ByteArray?, filter: List<ByteArray>?) {
         if (!subscriber) return
         handler.post {
-          if (handles.discoveryState(discoveryHandle) != AwareHandleRegistry.HandleState.LIVE) return@post
-          val peerHandle = peers[discoveryHandle]?.getOrPut(peer) { newHandle("peer") } ?: return@post
+          val peerHandle = registerPeer(discoveryHandle, peer) ?: return@post
           emitOnPeerFound(Arguments.createMap().apply {
+            putString("eventType", "peerFound")
             putString("discoverySessionHandle", discoveryHandle)
             putString("peerHandle", peerHandle)
+            putArray("payload", Arguments.createArray())
+          })
+        }
+      }
+      override fun onMessageSendSucceeded(messageId: Int) {
+        handler.post {
+          pendingMessages.complete(discoveryHandle, messageId)?.value?.resolve(null)
+        }
+      }
+      override fun onMessageSendFailed(messageId: Int) {
+        handler.post {
+          pendingMessages.complete(discoveryHandle, messageId)?.value?.reject(
+            "MESSAGE_SEND_FAILED",
+            "Wi-Fi Aware message send failed"
+          )
+        }
+      }
+      override fun onMessageReceived(peer: PeerHandle, message: ByteArray) {
+        handler.post {
+          val peerHandle = registerPeer(discoveryHandle, peer) ?: return@post
+          emitOnPeerFound(Arguments.createMap().apply {
+            putString("eventType", "messageReceived")
+            putString("discoverySessionHandle", discoveryHandle)
+            putString("peerHandle", peerHandle)
+            putArray("payload", Arguments.createArray().apply {
+              message.forEach { pushInt(it.toInt() and 0xff) }
+            })
           })
         }
       }
@@ -229,6 +262,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   @RequiresApi(26)
   private fun closeDiscovery(handle: String, closeNative: Boolean = true) {
     val record = handles.closeDiscovery(handle) ?: return
+    rejectPendingMessagesForDiscovery(handle, "DISCOVERY_CLOSED", "Discovery closed before message completed")
     peers.remove(handle)
     if (closeNative) record.value.close()
   }
@@ -236,6 +270,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   @RequiresApi(26)
   private fun terminateDiscovery(handle: String) {
     val record = handles.closeDiscovery(handle)
+    rejectPendingMessagesForDiscovery(handle, "DISCOVERY_CLOSED", "Discovery terminated before message completed")
     peers.remove(handle)
     if (record == null) {
       pendingDiscoveries.remove(handle)?.second?.reject(
@@ -243,6 +278,93 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
         "Discovery terminated before it started"
       )
     }
+  }
+
+  override fun sendMessage(discoverySessionHandle: String, peerHandle: String, payload: ReadableArray, promise: Promise) {
+    handler.post {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        promise.reject("UNSUPPORTED", "Wi-Fi Aware requires API 26")
+      } else {
+        sendMessageApi26(discoverySessionHandle, peerHandle, payload, promise)
+      }
+    }
+  }
+
+  @RequiresApi(26)
+  private fun sendMessageApi26(discoveryHandle: String, peerHandle: String, payload: ReadableArray, promise: Promise) {
+    if (!isAwareAvailable()) {
+      disposeNativeState("UNAVAILABLE", "Wi-Fi Aware became unavailable")
+      promise.reject("UNAVAILABLE", "Wi-Fi Aware is unavailable")
+      return
+    }
+    if (!hasDiscoveryPermission()) {
+      promise.reject("PERMISSION_DENIED", "Discovery permission is not granted")
+      return
+    }
+    val discovery = handles.discovery(discoveryHandle)?.value
+    if (discovery == null) {
+      val code = if (handles.discoveryState(discoveryHandle) == AwareHandleRegistry.HandleState.CLOSED) "DISCOVERY_CLOSED" else "INVALID_HANDLE"
+      promise.reject(code, "Discovery session is not live")
+      return
+    }
+    val peer = peers[discoveryHandle]?.entries?.firstOrNull { it.value == peerHandle }?.key
+    if (peer == null) {
+      promise.reject("INVALID_HANDLE", "Peer does not belong to this discovery session")
+      return
+    }
+    val bytes = bytePayload(payload, promise) ?: return
+    val maxLength = try {
+      (reactApplicationContext.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager)
+        ?.characteristics?.maxServiceSpecificInfoLength
+    } catch (error: SecurityException) {
+      promise.reject("PERMISSION_DENIED", "Missing Wi-Fi Aware permission", error)
+      return
+    } catch (error: RuntimeException) {
+      promise.reject("INTERNAL_ERROR", "Unable to read Wi-Fi Aware characteristics", error)
+      return
+    }
+    if (maxLength != null && bytes.size > maxLength) {
+      promise.reject("INVALID_ARGUMENT", "Message exceeds the device Wi-Fi Aware payload limit")
+      return
+    }
+    val messageId = pendingMessages.begin(discoveryHandle, promise)
+    try {
+      discovery.sendMessage(peer, messageId, bytes)
+    } catch (error: IllegalArgumentException) {
+      pendingMessages.complete(discoveryHandle, messageId)?.value?.reject("INVALID_ARGUMENT", "Invalid Wi-Fi Aware message", error)
+    } catch (error: SecurityException) {
+      pendingMessages.complete(discoveryHandle, messageId)?.value?.reject("PERMISSION_DENIED", "Discovery permission is not granted", error)
+    } catch (error: RuntimeException) {
+      pendingMessages.complete(discoveryHandle, messageId)?.value?.reject("INTERNAL_ERROR", "Unable to send Wi-Fi Aware message", error)
+    }
+  }
+
+  private fun bytePayload(payload: ReadableArray, promise: Promise): ByteArray? {
+    val bytes = ByteArray(payload.size())
+    for (index in 0 until payload.size()) {
+      if (payload.getType(index) != ReadableType.Number) {
+        promise.reject("INVALID_ARGUMENT", "Message payload must contain byte values")
+        return null
+      }
+      val value = payload.getDouble(index)
+      if (!value.isFinite() || value % 1 != 0.0 || value < 0 || value > 255) {
+        promise.reject("INVALID_ARGUMENT", "Message payload values must be integers from 0 to 255")
+        return null
+      }
+      bytes[index] = value.toInt().toByte()
+    }
+    return bytes
+  }
+
+  @RequiresApi(26)
+  private fun registerPeer(discoveryHandle: String, peer: PeerHandle): String? {
+    if (handles.discoveryState(discoveryHandle) != AwareHandleRegistry.HandleState.LIVE) return null
+    return peers[discoveryHandle]?.getOrPut(peer) { newHandle("peer") }
+  }
+
+  @RequiresApi(26)
+  private fun rejectPendingMessagesForDiscovery(handle: String, code: String, message: String) {
+    pendingMessages.removeForDiscovery(handle).forEach { it.value.reject(code, message) }
   }
 
   @RequiresApi(26)
@@ -294,6 +416,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   private fun disposeNativeState(code: String, message: String) {
     pendingAttaches.values.forEach { it.reject(code, message) }
     pendingDiscoveries.values.forEach { it.second.reject(code, message) }
+    pendingMessages.invalidate().forEach { it.value.reject(code, message) }
     pendingAttaches.clear(); pendingDiscoveries.clear()
     val (sessions, discoveries) = handles.invalidate()
     discoveries.forEach { it.value.close() }
