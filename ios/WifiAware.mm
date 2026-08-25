@@ -56,6 +56,22 @@
   reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
 }
 
+- (void)openDataPath:(NSString *)discoverySessionHandle
+           peerHandle:(NSString *)peerHandle
+              options:(JS::NativeWifiAware::NativeDataPathOptions &)options
+              resolve:(RCTPromiseResolveBlock)resolve
+               reject:(RCTPromiseRejectBlock)reject
+{
+  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+}
+
+- (void)closeDataPath:(NSString *)handle
+               resolve:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject
+{
+  reject(@"UNSUPPORTED", @"Wi-Fi Aware is not implemented on Apple platforms yet", nil);
+}
+
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params
 {
