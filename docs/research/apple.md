@@ -6,7 +6,19 @@ Apps require `com.apple.developer.wifi-aware` with `Publish` and/or `Subscribe`,
 
 **Documented.** Apple service names are signed, static declarations rather than arbitrary runtime discovery strings. A declared service must be a fully qualified `_name._tcp` or `_name._udp` name; its name component is limited to 15 characters and invalid declarations can crash the app. The Android-only example value `com.wifiaware.stage4` is therefore a stage-scoped test identifier, not a portable library service identity. [Service declarations](https://developer.apple.com/documentation/wifiaware/adopting-wi-fi-aware)
 
-**Decision required before Stage 6.** Do not silently rewrite JavaScript `serviceName` values on Apple. Choose and document either a build-time declared service registry or an explicit iOS restriction to declared service names that rejects every other value. Keep any test service neutral and stage-independent (for example, `_rn-aware._tcp` after validating Android accepts it).
+**Decision (Stage 6).** Apple accepts a JavaScript `serviceName` only when it
+exactly matches the relevant role in the host app's `WiFiAwareServices` plist;
+it rejects every other value and never rewrites Android names. The library
+cannot add host-app signing or plist configuration. The generated example uses
+the Apple-only `_rn-aware._tcp` service and declares both roles; it does not
+claim that name is valid for Android or that the platforms interoperate.
+
+**Documented + library mapping.** DeviceDiscoveryUI presents the system pairing
+flow. On Apple, `presentPairing(discoveryHandle)` resolves when the system UI is
+presented, not when pairing or connection succeeds. A subscriber `onPeerFound`
+event is a browser-discovered endpoint; a publisher event is an eligible paired
+device. Both are discovery-scoped opaque handles and allow Stage 7's existing
+client/server data-path API to remain explicit.
 
 Wi-Fi Aware extends Network framework: listener publishes, browser discovers, connection transfers data, and errors/path details are surfaced through Network types. Retain and cancel browsers/listeners/connections deliberately. [Connections](https://developer.apple.com/documentation/wifiaware/connecting-paired-devices)
 

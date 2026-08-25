@@ -164,6 +164,13 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   override fun subscribe(handle: String, options: ReadableMap, promise: Promise) =
     startDiscovery(handle, options, promise, subscriber = true)
 
+  override fun presentPairing(handle: String, promise: Promise) {
+    // Android's completed stages have no equivalent system pairing surface.
+    // Keep the shared Codegen contract explicit rather than pretending that a
+    // discovery peer is a paired Apple peer.
+    promise.reject("UNSUPPORTED", "System pairing UI is not implemented on Android")
+  }
+
   private fun startDiscovery(parent: String, options: ReadableMap, promise: Promise, subscriber: Boolean) {
     handler.post {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) promise.reject("UNSUPPORTED", "Wi-Fi Aware requires API 26")

@@ -33,6 +33,9 @@
     "package": "wifiaware.example"
   },
   "ios": {
-    "bundleIdentifier": "wifiaware.example"
+    "bundleIdentifier": "wifiaware.example",
+    "codeSignEntitlements": {
+      "com.apple.developer.wifi-aware": ["Publish", "Subscribe"]
+    }
   }
 }
