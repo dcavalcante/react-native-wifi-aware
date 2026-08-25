@@ -11,7 +11,7 @@ import WiFiAware
  * system controllers never leave native code.
  */
 @objc(WifiAwareCoordinator)
-final class WifiAwareCoordinator: NSObject {
+public final class WifiAwareCoordinator: NSObject {
   private enum DiscoveryRole {
     case publisher
     case subscriber
@@ -38,7 +38,7 @@ final class WifiAwareCoordinator: NSObject {
     }
   }
 
-  @objc static let shared = WifiAwareCoordinator()
+  @objc public static let shared = WifiAwareCoordinator()
 
   private let lock = NSLock()
   private var sessions = [String: SessionRecord]()
@@ -46,14 +46,14 @@ final class WifiAwareCoordinator: NSObject {
   private var eventSink: ((NSDictionary) -> Void)?
 
   @objc(setEventSink:)
-  func setEventSink(_ sink: @escaping (NSDictionary) -> Void) {
+  public func setEventSink(_ sink: @escaping (NSDictionary) -> Void) {
     lock.lock()
     eventSink = sink
     lock.unlock()
   }
 
   @objc(capabilities)
-  func capabilities() -> NSDictionary {
+  public func capabilities() -> NSDictionary {
     guard #available(iOS 26.0, *) else {
       return ["isSupported": false, "isAvailable": false]
     }
@@ -64,7 +64,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(attachWithResolve:reject:)
-  func attach(
+  public func attach(
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
@@ -80,7 +80,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(closeSessionWithHandle:resolve:reject:)
-  func closeSession(
+  public func closeSession(
     handle: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -106,7 +106,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(publishWithSessionHandle:serviceName:resolve:reject:)
-  func publish(
+  public func publish(
     sessionHandle: String,
     serviceName: String,
     resolve: @escaping RCTPromiseResolveBlock,
@@ -122,7 +122,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(subscribeWithSessionHandle:serviceName:resolve:reject:)
-  func subscribe(
+  public func subscribe(
     sessionHandle: String,
     serviceName: String,
     resolve: @escaping RCTPromiseResolveBlock,
@@ -138,7 +138,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(presentPairingWithDiscoveryHandle:resolve:reject:)
-  func presentPairing(
+  public func presentPairing(
     discoveryHandle: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -213,7 +213,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(closeDiscoveryWithHandle:resolve:reject:)
-  func closeDiscovery(
+  public func closeDiscovery(
     handle: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -230,7 +230,7 @@ final class WifiAwareCoordinator: NSObject {
   }
 
   @objc(invalidate)
-  func invalidate() {
+  public func invalidate() {
     let records: [DiscoveryRecord]
     lock.lock()
     records = Array(discoveries.values)
@@ -320,13 +320,13 @@ final class WifiAwareCoordinator: NSObject {
     let browser = NetworkBrowser(for: provider)
     let task = Task { [weak self, weak record] in
       do {
-        _ = try await browser.run { endpoints in
+        let endpoint: WAEndpoint = try await browser.run { endpoints in
           guard let endpoint = endpoints.first else { return .continue }
-          DispatchQueue.main.async {
-            guard let self, let record, !record.closed else { return }
-            self.registerPeer(endpoint, for: discoveryHandle, record: record)
-          }
           return .finish(endpoint)
+        }
+        DispatchQueue.main.async {
+          guard let self, let record, !record.closed else { return }
+          self.registerPeer(endpoint, for: discoveryHandle, record: record)
         }
       } catch {
         // The public contract has no discovery-state event. Closing a parent

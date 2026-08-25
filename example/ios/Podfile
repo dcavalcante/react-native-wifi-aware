@@ -13,7 +13,7 @@ use_test_app! :hermes_enabled => true,
                 # `pod install`. Reapply the example-only, static Apple service
                 # declaration after generation; consumer apps configure their
                 # own host target as documented by the library.
-                info_plist = File.join(__dir__, 'ReactTestApp', 'Info.plist')
+                info_plist = File.join(ws_dir, 'node_modules', '.generated', 'ios', 'Info.plist')
                 next unless File.exist?(info_plist)
 
                 info = Xcodeproj::Plist.read_from_path(info_plist)

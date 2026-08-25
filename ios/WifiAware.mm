@@ -39,7 +39,7 @@
 {
   [[WifiAwareCoordinator shared]
       publishWithSessionHandle:handle
-                   serviceName:[NSString stringWithUTF8String:options.serviceName.c_str()]
+                   serviceName:options.serviceName()
                        resolve:resolve
                         reject:reject];
 }
@@ -51,7 +51,7 @@
 {
   [[WifiAwareCoordinator shared]
       subscribeWithSessionHandle:handle
-                     serviceName:[NSString stringWithUTF8String:options.serviceName.c_str()]
+                     serviceName:options.serviceName()
                          resolve:resolve
                           reject:reject];
 }
@@ -107,7 +107,6 @@
 - (void)invalidate
 {
   [[WifiAwareCoordinator shared] invalidate];
-  [super invalidate];
 }
 
 + (NSString *)moduleName
