@@ -1,6 +1,6 @@
 # Stage 6 Apple discovery foundation validation
 
-Date: 2026-08-25. Status: `IMPLEMENTED — COMPILE, SIGNING, AND PHYSICAL VALIDATION PENDING`.
+Date: 2026-08-25, updated 2026-08-28. Status: `IMPLEMENTED — SIMULATOR BUILD AND LAUNCH PASS; DEVICE VALIDATION PENDING`.
 
 Implemented source surfaces:
 
@@ -22,17 +22,17 @@ Static checks passed on 2026-08-25:
   errors.
 - `yarn typecheck` exited 0.
 
-The user explicitly deferred native Codegen generation, package build, CocoaPods
-install, Xcode compilation, Apple entitlement provisioning, install, and
-two-device validation. Those are a single pending Apple validation gate; this
-record makes no runtime, signing, App Store capability, or Android↔Apple claim.
+The generated app was compiled with Xcode for the iOS simulator, and the user
+observed it launch. This checks the current generated host and native bridge
+only: the simulator reports Wi-Fi Aware unsupported by design.
 
 When that gate is authorized, validate the generated test host before launch:
 
 1. inspect its generated `App.entitlements` for `Publish` and `Subscribe` and
    its `Info.plist` for `_rn-aware._tcp` with both roles;
 2. compile against an Xcode version containing the iOS 26 Wi-Fi Aware SDK;
-3. use a paid Apple team to sign/install on two eligible devices;
+3. sign/install on two eligible devices using the normal Xcode device-deploy
+   workflow;
 4. on the publisher: attach, publish, open the pairing UI, and confirm a
    paired-peer event; on the subscriber: attach, subscribe, open the device
    picker, pair/select the publisher, and confirm a browser peer event;

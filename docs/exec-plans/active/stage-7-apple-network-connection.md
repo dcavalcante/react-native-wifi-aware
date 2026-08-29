@@ -1,6 +1,6 @@
 # Stage 7 — Apple network connection
 
-Status: `ACTIVE — COMPILE GATE AUTHORIZED; PHYSICAL VALIDATION PENDING`.
+Status: `PROVISIONAL — PHYSICAL VALIDATION PENDING`.
 
 ## Scope and contract
 
@@ -52,7 +52,7 @@ physical Apple claim is in scope. Stage 10 remains the optional transfer layer.
 | Performance | **Documented:** publisher and subscriber performance modes must match. **Decision:** leave both at Apple's default bulk mode and expose no tuning surface. |
 | State/loss | **Documented:** Network listener/connection state callbacks report ready, waiting, failed, and cancellation/loss conditions. **Inference:** map ready to `connected`, unrecoverable errors to `failed`, parent/network cancellation to `lost` or `closed` according to the initiating owner. |
 | Ownership | **Inference:** data-path registry records discovery ownership, generation, cancellation closure, and one terminal event; it is retired before any parent registry so late task/state callbacks cannot publish. |
-| Validation debt | **Physical verification required:** entitlement recognition, TLS/system pairing behavior, listener acceptance, client readiness, loss, close, and Xcode SDK compatibility require a paid team and two eligible iOS/iPadOS 26 devices. |
+| Validation debt | **Physical verification required:** entitlement recognition, TLS/system pairing behavior, listener acceptance, client readiness, loss, close, and Xcode SDK compatibility require two eligible iOS/iPadOS devices. Any signing or entitlement issue is established during normal device deployment. |
 
 Sources: [Apple connection guide](https://developer.apple.com/documentation/wifiaware/connecting-paired-devices) · [NetworkConnection](https://developer.apple.com/documentation/network/networkconnection) · [WASharedSecret](https://developer.apple.com/documentation/wifiaware/washaredsecret) · [WAPublisherListener action](https://developer.apple.com/documentation/wifiaware/wapublisherlistener/action/connecting%28to%3Afrom%3Adatapath%3A%29).
 
@@ -82,7 +82,8 @@ Sources: [Apple connection guide](https://developer.apple.com/documentation/wifi
 | Readiness review | READY — BUILD GATE AUTHORIZED; PHYSICAL VALIDATION PENDING | Focused review verified the Apple harness flow, peer categories, passphrase semantics, accepted-path ownership, lifecycle/event routing, and current Codegen bridge accessors. Stage 6's current-generator fixes are now in the branch; Stage 7's two new bridge methods are public and the active-path error uses the existing public code. Current SDK inspection also bounds the subscriber picker conversion to iOS 26.4+. |
 | Implementation | PASS | iOS coordinator owns publisher-listener/subscriber-connection records, terminal state routing, teardown, and the iOS example's pairing → listener → client flow. |
 | Static validation | PASS | `yarn lint` exited 0 with eight existing/example `no-void` warnings and no errors; `yarn typecheck` exited 0 on 2026-08-25. Formatter ran for the changed TypeScript example. |
-| Apple compile/signing/device validation | PENDING | User-directed deferred gate; no runtime result may be claimed. |
+| Apple simulator build/launch | PASS | The generated example built with `xcodebuild -workspace WifiAwareExample.xcworkspace -configuration Debug -scheme WifiAwareExample -destination 'generic/platform=iOS Simulator'`; the user observed it launch. The simulator cannot validate Wi-Fi Aware behavior. |
+| Apple device validation | PENDING | Pairing, listener acceptance, client readiness, loss, close, signing, and entitlement behavior require the dedicated two-device test. |
 
 ## Stop conditions
 

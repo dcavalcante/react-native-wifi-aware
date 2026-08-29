@@ -1,7 +1,6 @@
 # Stage 6 — Apple discovery foundation
 
-Status: ACTIVE. Expected completion state: `PROVISIONAL — PHYSICAL VALIDATION
-PENDING`.
+Status: `PROVISIONAL — PHYSICAL VALIDATION PENDING`.
 
 ## Scope and public contract
 
@@ -63,7 +62,7 @@ guarantees, accessory onboarding, or a physical Apple runtime claim.
 | Discovery | **Documented:** retain a Wi-Fi Aware `NetworkListener` for a publishable service and a `NetworkBrowser` for a subscribable service, restricted to paired/user-selected devices. Store endpoints and paired-device identities only natively and emit discovery-scoped eligible peer handles. |
 | Lifecycle | **Inference:** one Swift-owned registry gives sessions/discoveries/generations deterministic idempotent close. Presentation, browser/listener state, and asynchronous paired-device updates are ignored after retirement. |
 | Stage 7 handoff | **Documented + inference:** retain discovered endpoints and publisher listener ownership so Stage 7 can create a `NetworkConnection` without exposing network objects to JS. |
-| Validation debt | **Physical verification required:** the entitlement, plist configuration, pairing UI, actual discovery, and task cancellation require a paid Apple team and two eligible iOS/iPadOS 26 devices. User-directed deferral also leaves the iOS compile gate pending. |
+| Validation debt | **Physical verification required:** the entitlement, plist configuration, pairing UI, actual discovery, and task cancellation require two eligible iOS/iPadOS devices. The normal device deployment will reveal any signing or entitlement issue. |
 
 Sources: [Adopting Wi-Fi Aware](https://developer.apple.com/documentation/wifiaware/adopting-wi-fi-aware) · [DeviceDiscoveryUI](https://developer.apple.com/documentation/DeviceDiscoveryUI) · [Apple peer-to-peer sample](https://developer.apple.com/documentation/WiFiAware/Building-peer-to-peer-apps) · [paired devices](https://developer.apple.com/documentation/wifiaware/wapaireddevice/alldevices).
 
@@ -83,8 +82,8 @@ Sources: [Adopting Wi-Fi Aware](https://developer.apple.com/documentation/wifiaw
    entitlement values, and `example/ios/Podfile` reapplies the valid static
    `_rn-aware._tcp` `WiFiAwareServices` plist entry after each generated-project
    run. This is example-only; consumer setup is documented separately.
-5. Record static checks. Per the approved validation economy, defer iOS build,
-   signing, install, and physical testing to the later Apple validation stage.
+5. Record static checks and the iOS simulator compile/launch baseline. Device
+   deployment and physical testing remain the Apple validation stage.
 
 ## Gate record
 
@@ -92,8 +91,9 @@ Sources: [Adopting Wi-Fi Aware](https://developer.apple.com/documentation/wifiaw
 |---|---|---|
 | Readiness review | PASS | 2026-08-25: independent review returned `READY — PROVISIONAL PHYSICAL VALIDATION PENDING`; no BLOCKING/HIGH findings. It required and then confirmed the publisher paired-peer mapping, Android generated stub, reproducible test-app configuration, and explicit deferred compile/physical debt. |
 | Implementation | PASS | Shared pairing API and Android stub; Swift registry/capabilities/strict service lookup/system pairing/subscriber browser; Objective-C++ event bridge; generated-example entitlement/plist configuration; and visible pairing control are present. |
-| Static validation | PENDING | `yarn lint` exited 0 (8 existing/example warnings; 0 errors) and `yarn typecheck` exited 0 on 2026-08-25. User also deferred Codegen/package generation, so this gate remains pending rather than being called CI-verified. |
-| Apple compile/signing/device validation | PENDING | Deferred to the dedicated later Apple validation stage; this stage must not be presented as runtime-ready. |
+| Static validation | PASS | `corepack yarn lint` and `corepack yarn typecheck` exited 0 on 2026-08-28. |
+| Apple simulator build/launch | PASS | The generated example built with `xcodebuild -workspace WifiAwareExample.xcworkspace -configuration Debug -scheme WifiAwareExample -destination 'generic/platform=iOS Simulator'`; the user observed the app launch. Wi-Fi Aware is unsupported on the simulator by design. |
+| Apple device validation | PENDING | Pairing, discovery, teardown, signing, and entitlement behavior require the dedicated two-device test. |
 | Final source review | PASS | 2026-08-25: independent review returned `READY — PROVISIONAL PHYSICAL VALIDATION PENDING`. It required the completed module-invalidation path: retire/cancel all Apple work, clear event sink/state, dismiss pairing UI, and avoid retaining a stale bridge. No BLOCKING/HIGH findings remain. |
 
 ## Stop conditions

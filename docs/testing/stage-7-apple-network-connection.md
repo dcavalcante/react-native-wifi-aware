@@ -1,7 +1,7 @@
 # Stage 7 Apple network connection validation
 
-Date: 2026-08-25. Status: `IMPLEMENTED — COMPILE, SIGNING, AND PHYSICAL
-VALIDATION PENDING`.
+Date: 2026-08-25, updated 2026-08-28. Status: `IMPLEMENTED — SIMULATOR BUILD
+AND LAUNCH PASS; DEVICE VALIDATION PENDING`.
 
 Implemented source surfaces:
 
@@ -26,12 +26,11 @@ The subscriber's system picker requires iOS 26.4 or later: the SDK makes its
 `NWEndpoint` to `WAEndpoint` conversion available at that version. On iOS
 26.0–26.3 the picker path rejects with `UNSUPPORTED`.
 
-The user explicitly deferred native Codegen generation, package build,
-CocoaPods install, Xcode compilation, Apple entitlement provisioning, install,
-and two-device validation. Static checks passed on 2026-08-25: `yarn lint`
-exited 0 with eight existing/example `no-void` warnings and no errors, and
-`yarn typecheck` exited 0. No runtime, signing, data-transfer, or
-cross-platform claim follows from this record.
+The current generated example passed the Xcode simulator compile, and the user
+observed the app launch. Static checks also passed: `corepack yarn lint` and
+`corepack yarn typecheck` exited 0. The simulator cannot validate Wi-Fi Aware.
+No device runtime, signing, data-transfer, or cross-platform claim follows from
+this record.
 
 An independent final source review returned `READY — PROVISIONAL PHYSICAL
 VALIDATION PENDING` after verifying the Codegen bridge, event routing,
@@ -40,8 +39,7 @@ publisher/subscriber peer mapping, lifecycle cleanup, and the iOS harness flow.
 When the dedicated Apple gate is authorized:
 
 1. first perform the Stage 6 generated-host entitlement/plist inspection and
-   compile/signing gate with a paid Apple team and two eligible iOS/iPadOS 26
-   devices;
+   normal Xcode device deployment on two eligible iOS/iPadOS devices;
 2. on the publisher, attach, publish `_rn-aware._tcp`, open **Pair Apple
    device**, complete system pairing, wait for the visible paired-peer state,
    and press **Start publisher server data path**;
