@@ -45,7 +45,6 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     var connected = false
     var acceptedConnection = false
     var task: Task<Void, Never>?
-    var cancelNetwork: (() -> Void)?
 
     init(discoveryHandle: String, role: String) {
       self.discoveryHandle = discoveryHandle
@@ -371,8 +370,6 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
 
     paths.forEach {
       $0.task?.cancel()
-      $0.cancelNetwork?()
-      $0.cancelNetwork = nil
     }
 
     DispatchQueue.main.async {
@@ -533,18 +530,14 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
 
         try await listener.run { [weak self, weak record] connection in
           guard let self, let record,
-                self.bindAcceptedConnection(
-                  handle: handle,
-                  record: record,
-                  cancelNetwork: { connection.cancel() }
-                )
+                self.bindAcceptedConnection(handle: handle, record: record)
           else {
-            connection.cancel()
             return
           }
           connection.onStateUpdate { [weak self, weak record] _, state in
             self?.handleConnectionState(state, handle: handle, record: record)
           }
+          try await Self.waitForTaskCancellation()
         }
       } catch is CancellationError {
         // Explicit close, parent teardown, and module invalidation are silent
@@ -567,13 +560,35 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     endpoint: WAEndpoint
   ) -> Task<Void, Never> {
     Task { [weak self, weak record] in
-      let connection = NetworkConnection(to: endpoint, using: { TLS() })
-        .onStateUpdate { [weak self, weak record] _, state in
+      do {
+        // WAEndpoint is a Connectable, so it can create the typed Wi-Fi Aware
+        // NetworkConnection directly. Keep it in this task's scope; the new
+        // Network API closes it when this task ends or is cancelled.
+        let connection = NetworkConnection(to: endpoint, using: { TLS() })
+        connection.onStateUpdate { [weak self, weak record] _, state in
           self?.handleConnectionState(state, handle: handle, record: record)
         }
-      self?.setDataPathCancellation(handle, record: record, cancelNetwork: { connection.cancel() })
-      _ = connection.start()
+        try await Self.waitForTaskCancellation()
+      } catch is CancellationError {
+        // Explicit close, parent teardown, and module invalidation end the
+        // task, which releases the NetworkConnection and closes it.
+      } catch {
+        self?.retireDataPath(
+          handle,
+          record: record,
+          state: "failed",
+          reason: "Unable to start subscriber connection: \(error)"
+        )
+      }
     }
+  }
+
+  @available(iOS 26.0, *)
+  private static func waitForTaskCancellation() async throws {
+    // NetworkConnection has no cancel() API. Apple defines its lifetime by the
+    // task that owns it, so a data-path close cancels this suspension and drops
+    // the final connection reference.
+    try await Task.sleep(nanoseconds: UInt64.max)
   }
 
   @available(iOS 26.0, *)
@@ -608,8 +623,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
 
   private func bindAcceptedConnection(
     handle: String,
-    record: DataPathRecord,
-    cancelNetwork: @escaping () -> Void
+    record: DataPathRecord
   ) -> Bool {
     lock.lock()
     guard dataPaths[handle] === record, !record.terminal, !record.acceptedConnection else {
@@ -617,29 +631,8 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
       return false
     }
     record.acceptedConnection = true
-    let previousCancel = record.cancelNetwork
-    record.cancelNetwork = {
-      previousCancel?()
-      cancelNetwork()
-    }
     lock.unlock()
     return true
-  }
-
-  private func setDataPathCancellation(
-    _ handle: String,
-    record: DataPathRecord?,
-    cancelNetwork: @escaping () -> Void
-  ) {
-    guard let record else { return }
-    lock.lock()
-    guard dataPaths[handle] === record, !record.terminal else {
-      lock.unlock()
-      cancelNetwork()
-      return
-    }
-    record.cancelNetwork = cancelNetwork
-    lock.unlock()
   }
 
   private func emitConnected(_ handle: String, record: DataPathRecord?) {
@@ -668,7 +661,6 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
   ) {
     guard let record else { return }
     let task: Task<Void, Never>?
-    let cancelNetwork: (() -> Void)?
     let sink: ((NSDictionary) -> Void)?
     lock.lock()
     guard dataPaths[handle] === record, !record.terminal else {
@@ -678,13 +670,10 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     record.terminal = true
     task = record.task
     record.task = nil
-    cancelNetwork = record.cancelNetwork
-    record.cancelNetwork = nil
     sink = eventSink
     lock.unlock()
 
     task?.cancel()
-    cancelNetwork?()
     sink?([
       "eventName": "onDataPathState",
       "dataPathHandle": handle,

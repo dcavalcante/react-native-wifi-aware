@@ -1,6 +1,6 @@
 # Stage 6 Apple discovery foundation validation
 
-Date: 2026-08-25, updated 2026-08-28. Status: `IMPLEMENTED — SIMULATOR BUILD AND LAUNCH PASS; DEVICE VALIDATION PENDING`.
+Date: 2026-08-25, updated 2026-08-29. Status: `IMPLEMENTED — SIMULATOR COMPILE PASS; DEVICE VALIDATION PENDING`.
 
 Implemented source surfaces:
 
@@ -22,9 +22,9 @@ Static checks passed on 2026-08-25:
   errors.
 - `yarn typecheck` exited 0.
 
-The generated app was compiled with Xcode for the iOS simulator, and the user
-observed it launch. This checks the current generated host and native bridge
-only: the simulator reports Wi-Fi Aware unsupported by design.
+The current generated app passed `yarn verify:ios` for the iOS simulator on
+2026-08-29. This checks the generated host and native bridge only: the
+simulator cannot validate Wi-Fi Aware behavior.
 
 When that gate is authorized, validate the generated test host before launch:
 

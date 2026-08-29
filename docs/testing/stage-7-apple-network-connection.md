@@ -1,7 +1,7 @@
 # Stage 7 Apple network connection validation
 
-Date: 2026-08-25, updated 2026-08-28. Status: `IMPLEMENTED — SIMULATOR BUILD
-AND LAUNCH PASS; DEVICE VALIDATION PENDING`.
+Date: 2026-08-25, updated 2026-08-29. Status: `IMPLEMENTED — SIMULATOR COMPILE
+PASS; DEVICE VALIDATION PENDING`.
 
 Implemented source surfaces:
 
@@ -26,10 +26,10 @@ The subscriber's system picker requires iOS 26.4 or later: the SDK makes its
 `NWEndpoint` to `WAEndpoint` conversion available at that version. On iOS
 26.0–26.3 the picker path rejects with `UNSUPPORTED`.
 
-The current generated example passed the Xcode simulator compile, and the user
-observed the app launch. Static checks also passed: `corepack yarn lint` and
-`corepack yarn typecheck` exited 0. The simulator cannot validate Wi-Fi Aware.
-No device runtime, signing, data-transfer, or cross-platform claim follows from
+The current generated example passed `yarn verify:ios` on 2026-08-29 after the
+unsupported `NetworkConnection.cancel()` calls were replaced with the current
+task-scoped lifetime model. The simulator cannot validate Wi-Fi Aware. No
+device runtime, signing, data-transfer, or cross-platform claim follows from
 this record.
 
 An independent final source review returned `READY — PROVISIONAL PHYSICAL

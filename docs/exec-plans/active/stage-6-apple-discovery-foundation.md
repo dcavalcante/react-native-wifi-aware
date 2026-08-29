@@ -92,7 +92,7 @@ Sources: [Adopting Wi-Fi Aware](https://developer.apple.com/documentation/wifiaw
 | Readiness review | PASS | 2026-08-25: independent review returned `READY — PROVISIONAL PHYSICAL VALIDATION PENDING`; no BLOCKING/HIGH findings. It required and then confirmed the publisher paired-peer mapping, Android generated stub, reproducible test-app configuration, and explicit deferred compile/physical debt. |
 | Implementation | PASS | Shared pairing API and Android stub; Swift registry/capabilities/strict service lookup/system pairing/subscriber browser; Objective-C++ event bridge; generated-example entitlement/plist configuration; and visible pairing control are present. |
 | Static validation | PASS | `corepack yarn lint` and `corepack yarn typecheck` exited 0 on 2026-08-28. |
-| Apple simulator build/launch | PASS | The generated example built with `xcodebuild -workspace WifiAwareExample.xcworkspace -configuration Debug -scheme WifiAwareExample -destination 'generic/platform=iOS Simulator'`; the user observed the app launch. Wi-Fi Aware is unsupported on the simulator by design. |
+| Apple simulator compile | PASS | The current generated example passed `yarn verify:ios` on 2026-08-29. Wi-Fi Aware is unsupported on the simulator by design. |
 | Apple device validation | PENDING | Pairing, discovery, teardown, signing, and entitlement behavior require the dedicated two-device test. |
 | Final source review | PASS | 2026-08-25: independent review returned `READY — PROVISIONAL PHYSICAL VALIDATION PENDING`. It required the completed module-invalidation path: retire/cancel all Apple work, clear event sink/state, dismiss pairing UI, and avoid retaining a stale bridge. No BLOCKING/HIGH findings remain. |
 

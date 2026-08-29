@@ -36,7 +36,8 @@
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
     "prepare": "bob build",
     "typecheck": "tsc",
-    "lint": "eslint \"**/*.{js,ts,tsx}\""
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "verify:ios": "RCT_USE_RN_DEP=1 RCT_USE_PREBUILT_RNCORE=1 yarn turbo run build:ios --cache-dir=.turbo/ios"
   },
   "keywords": [
     "react-native",

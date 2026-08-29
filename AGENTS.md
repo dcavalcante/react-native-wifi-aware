@@ -59,6 +59,12 @@ Use the smallest check that can answer the current question. Do not rebuild, rei
 
 Keep one short gate record in the active plan. A gate is `PASS`, `FAIL`, `PENDING`, or `UNKNOWN`; every `PASS` names its command or physical observation. Do work in this order: implementation, automated validation, then physical validation and review. An exploratory device smoke test may happen earlier to diagnose an integration issue, but it must be labelled exploratory and cannot satisfy the physical gate. Never infer a failed build from lost output, or infer a successful runtime test from installation/activity launch alone.
 
+For an iOS-native change, run `yarn verify:ios` before recording an Apple
+simulator-build pass. GitHub Actions uses that same command. Its zero exit is
+required evidence; a previously installed app, a stale build product, partial
+compiler diagnostics, or a simulator launch does not prove the current source
+compiled.
+
 ## Specialist roles
 
 Invoke specialists on demand: Android or Apple API uncertainty, React Native/Expo/Codegen ambiguity, a substantive approved implementation stage, or an independent consequential review. Ecosystem searches and routine repository stewardship are root-agent responsibilities; reserve a separate history audit for a planned push.
