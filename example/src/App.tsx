@@ -64,7 +64,9 @@ export default function App() {
   const [messageLog, setMessageLog] = useState<string[]>([]);
   const [activeDataPath, setActiveDataPath] = useState<string | null>(null);
   const [dataPathStatus, setDataPathStatus] = useState(
-    'Exchange hello first. The publisher starts the server, then the subscriber connects.'
+    Platform.OS === 'ios'
+      ? 'Pair the devices. The publisher starts its listener, then the subscriber connects.'
+      : 'Exchange hello first. The publisher starts the server, then the subscriber connects.'
   );
   const [dataPathLog, setDataPathLog] = useState<string[]>([]);
 
@@ -111,6 +113,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS !== 'android') return;
     const eventSubscription = onMessageReceived(
       ({ discoverySessionHandle, peerHandle, payload }) => {
         const received = String.fromCharCode(...payload);
@@ -119,11 +122,6 @@ export default function App() {
           ...current,
           `Received from ${peerHandle}: ${received}`,
         ]);
-        if (received === String.fromCharCode(...DATA_PATH_READY_MESSAGE)) {
-          setDataPathStatus(
-            'Publisher server request is ready. Start the subscriber client data path.'
-          );
-        }
         setMessageStatus(
           'Message received. This device can now send a reply to that peer.'
         );
@@ -159,13 +157,21 @@ export default function App() {
       setDataPathLog([]);
       setDataPathStatus(
         mode === 'publish'
-          ? 'Wait for subscriber hello, then start the server data path.'
-          : 'Discover the publisher, send hello, then wait for data-path ready.'
+          ? Platform.OS === 'ios'
+            ? 'Pair an Apple subscriber, then start the publisher listener.'
+            : 'Wait for subscriber hello, then start the server data path.'
+          : Platform.OS === 'ios'
+            ? 'Pair/select the Apple publisher, then wait for its listener before starting the client.'
+            : 'Discover the publisher, send hello, then wait for data-path ready.'
       );
       setMessageStatus(
         mode === 'subscribe'
-          ? 'Waiting for a publisher peer, then send hello.'
-          : 'Waiting for subscriber hello; reply after it arrives.'
+          ? Platform.OS === 'ios'
+            ? 'Apple message testing is unavailable; use pairing and the client data path.'
+            : 'Waiting for a publisher peer, then send hello.'
+          : Platform.OS === 'ios'
+            ? 'Apple message testing is unavailable; pair a subscriber, then start the listener.'
+            : 'Waiting for subscriber hello; reply after it arrives.'
       );
       setDiscoveryStatus(
         `${mode === 'publish' ? 'Publishing' : 'Subscribing'}: ${discovery}`
@@ -186,7 +192,9 @@ export default function App() {
     }
     if (!lastPeer) {
       setDataPathStatus(
-        'No peer is available. Discover first; the publisher also needs subscriber hello.'
+        Platform.OS === 'ios'
+          ? 'No eligible Apple peer is available. Complete pairing first.'
+          : 'No peer is available. Discover first; the publisher also needs subscriber hello.'
       );
       return;
     }
@@ -204,7 +212,7 @@ export default function App() {
         { role, passphrase: DATA_PATH_PASSPHRASE }
       );
       setActiveDataPath(handle);
-      if (role === 'server') {
+      if (role === 'server' && Platform.OS === 'android') {
         await sendMessage(
           lastPeer.discoverySessionHandle,
           lastPeer.peerHandle,
@@ -212,6 +220,10 @@ export default function App() {
         );
         setDataPathStatus(
           `Server request registered: ${handle}. Readiness message acknowledged.`
+        );
+      } else if (role === 'server') {
+        setDataPathStatus(
+          `Apple publisher listener registered: ${handle}. Start the subscriber client data path.`
         );
       } else {
         setDataPathStatus(`Client request registered: ${handle}.`);
@@ -256,6 +268,10 @@ export default function App() {
   };
 
   const sendHello = async () => {
+    if (Platform.OS !== 'android') {
+      setMessageStatus('Hello messaging is currently Android-only.');
+      return;
+    }
     if (!lastPeer) {
       setMessageStatus(
         'No peer is available yet. Discover or receive a message first.'
@@ -333,12 +349,14 @@ export default function App() {
         <View style={styles.button}>
           <Button title="Close test" onPress={() => void stopDiscovery()} />
         </View>
-        <View style={styles.button}>
-          <Button
-            title="Send hello to last peer"
-            onPress={() => void sendHello()}
-          />
-        </View>
+        {Platform.OS === 'android' ? (
+          <View style={styles.button}>
+            <Button
+              title="Send hello to last peer"
+              onPress={() => void sendHello()}
+            />
+          </View>
+        ) : null}
         <View style={styles.button}>
           <Button
             title="Start publisher server data path"
@@ -358,13 +376,17 @@ export default function App() {
         </View>
       </View>
       <Text style={styles.status}>{discoveryStatus}</Text>
-      <Text style={styles.status}>{messageStatus}</Text>
+      {Platform.OS === 'android' ? (
+        <Text style={styles.status}>{messageStatus}</Text>
+      ) : null}
       <Text style={styles.status}>{dataPathStatus}</Text>
-      {messageLog.map((entry, index) => (
-        <Text key={`${entry}-${index}`} style={styles.log}>
-          {entry}
-        </Text>
-      ))}
+      {Platform.OS === 'android'
+        ? messageLog.map((entry, index) => (
+            <Text key={`${entry}-${index}`} style={styles.log}>
+              {entry}
+            </Text>
+          ))
+        : null}
       {dataPathLog.map((entry, index) => (
         <Text key={`${entry}-${index}`} style={styles.log}>
           {entry}
