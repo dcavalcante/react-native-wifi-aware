@@ -7,14 +7,13 @@ The project uses a TypeScript TurboModule API with Kotlin on Android and an Obje
 ## Status
 
 The repository is intentionally early-stage. Android capability, discovery,
-follow-up messaging, and secure data paths are physically verified on two
+follow-up messaging, and the PSK data path are physically verified on two
 Android devices. Apple iOS-26 discovery, pairing, and network-connection code
-is provisional: its source and static checks are present, and simulator
-compilation passed; entitlement signing and two-device runtime validation
-remain pending. File transfer and Android-to-Apple interoperability are not
-implemented. Android's current app-managed PSK data path is Android-only;
-Stage 9 adds the Android 17 framework-paired path required for an
-Apple-compatible connection. See the [roadmap](docs/ROADMAP.md),
+remains provisional pending entitlement-signed device tests. Stage 9 implements
+and compile-verifies the Android 17.2 framework-paired path, explicit
+`psk`/`paired` contract, shared `_rn-aware._tcp` example service, and raw-TCP
+common primitive. iPhone↔Android runtime interoperability is still physically
+unverified. File transfer remains out of scope. See the [roadmap](docs/ROADMAP.md),
 [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md)
 before relying on it.
 
@@ -28,9 +27,13 @@ npm install react-native-wifi-aware
 
 Native Android permissions supplied by the library merge into the consuming app. Platform availability remains a runtime capability question.
 
-## Initial API
+## API
 
-The current API provides a synchronous Android capability snapshot plus Android API-26+ attachment and basic discovery. Discovery needs the platform's runtime nearby-Wi-Fi permission; this library declares the relevant manifest permissions but deliberately does not prompt for them.
+The current API provides a synchronous local capability snapshot, attachment,
+discovery, platform pairing UI where applicable, and native data-path lifecycle
+handles. Discovery needs the platform's runtime nearby-Wi-Fi permission; this
+library declares the relevant Android manifest permissions but deliberately does
+not prompt for them.
 
 ```ts
 import { getCapabilities } from 'react-native-wifi-aware';
@@ -39,19 +42,55 @@ const { isSupported, isAvailable } = getCapabilities();
 ```
 
 ```ts
-import { attach, closeSession, subscribe, onPeerFound } from 'react-native-wifi-aware';
+import {
+  attach,
+  closeDiscoverySession,
+  closeSession,
+  onPeerFound,
+  subscribe,
+} from 'react-native-wifi-aware';
 
 const session = await attach();
-await subscribe(session, { serviceName: 'com.example.demo' });
+const discovery = await subscribe(session, {
+  serviceName: '_my-service._tcp',
+  securityMode: 'paired',
+});
 const subscription = onPeerFound(({ discoverySessionHandle, peerHandle }) => {
   // Opaque native handles; peerHandle is scoped to discoverySessionHandle.
 });
 
 subscription.remove();
+await closeDiscoverySession(discovery);
 await closeSession(session);
 ```
 
-On Android API 24-25 and devices without Wi-Fi Aware, both capability fields are `false`. On API 26 and above, `isSupported` reports the hardware feature and `isAvailable` reports current service availability. On Apple iOS 26+, both fields reflect Apple's supported-feature snapshot; Apple has no Android-equivalent mutable availability query, so individual operations remain authoritative. The Apple implementation has passed its simulator compiler gate; signing and physical-device gates remain pending.
+`getCapabilities()` also exposes `isPairedDataPathSupported`. On Android it is
+true only on a Wi-Fi Aware device running the Android 17.2 paired-path API; on
+Apple it reflects Wi-Fi Aware feature support. It only describes the local
+primitive, never a remote peer or completed pairing. Android API 24-25 and
+devices without Wi-Fi Aware report all relevant capabilities as `false`; Apple
+has no Android-equivalent mutable availability query, so individual operations
+remain authoritative.
+
+`openDataPath` has explicit, non-interchangeable security modes:
+
+```ts
+await openDataPath(discovery, peerHandle, {
+  role: 'client',
+  security: { mode: 'paired' },
+});
+
+await openDataPath(discovery, peerHandle, {
+  role: 'client',
+  security: { mode: 'psk', passphrase: 'android-only-secret' },
+});
+```
+
+`paired` is the only Apple mode and is the only mode intended for future
+iPhone↔eligible-Android use. `psk` is an Android↔Android path; it cannot be
+made Apple-compatible by using the same service name or passphrase. The API
+only establishes native connection lifecycle; it does not expose a JavaScript
+byte stream, framing, or file transfer.
 
 On Apple iOS 26, the host application must add the Wi-Fi Aware capability with
 the `Publish` and/or `Subscribe` entitlement values and declare every service

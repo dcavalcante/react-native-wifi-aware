@@ -2,7 +2,8 @@ buildscript {
   ext.WifiAware = [
     kotlinVersion: "2.0.21",
     minSdkVersion: 24,
-    compileSdkVersion: 36
+    compileSdkVersion: 37,
+    compileSdkMinorVersion: 2
   ]
 
   ext.getExtOrDefault = { prop ->
@@ -19,7 +20,7 @@ buildscript {
   }
 
   dependencies {
-    classpath "com.android.tools.build:gradle:8.7.2"
+    classpath "com.android.tools.build:gradle:8.12.3"
     // noinspection DifferentKotlinGradleVersion
     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion')}"
   }
@@ -34,7 +35,10 @@ apply plugin: "com.facebook.react"
 android {
   namespace "com.wifiaware"
 
-  compileSdkVersion getExtOrDefault("compileSdkVersion")
+  // Stage 9 calls public Android 37.2 APIs. A consuming app can set a newer
+  // target, but it cannot compile this native source against an older SDK.
+  compileSdkVersion WifiAware.compileSdkVersion
+  compileSdkMinor WifiAware.compileSdkMinorVersion
 
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")

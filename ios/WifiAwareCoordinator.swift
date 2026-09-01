@@ -26,15 +26,22 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     let sessionHandle: String
     let role: DiscoveryRole
     let serviceName: String
+    let securityMode: String
     var closed = false
     var peers = [String: Any]()
     var tasks = [Task<Void, Never>]()
     weak var pairingController: UIViewController?
 
-    init(sessionHandle: String, role: DiscoveryRole, serviceName: String) {
+    init(
+      sessionHandle: String,
+      role: DiscoveryRole,
+      serviceName: String,
+      securityMode: String
+    ) {
       self.sessionHandle = sessionHandle
       self.role = role
       self.serviceName = serviceName
+      self.securityMode = securityMode
     }
   }
 
@@ -70,12 +77,20 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
   @objc(capabilities)
   public func capabilities() -> NSDictionary {
     guard #available(iOS 26.0, *) else {
-      return ["isSupported": false, "isAvailable": false]
+      return [
+        "isSupported": false,
+        "isAvailable": false,
+        "isPairedDataPathSupported": false,
+      ]
     }
     let supported = WACapabilities.supportedFeatures.contains(.wifiAware)
     // Apple exposes supported features, not Android's mutable service
     // availability snapshot. Individual operations surface runtime failures.
-    return ["isSupported": supported, "isAvailable": supported]
+    return [
+      "isSupported": supported,
+      "isAvailable": supported,
+      "isPairedDataPathSupported": supported,
+    ]
   }
 
   @objc(attachWithResolve:reject:)
@@ -120,32 +135,36 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     resolve(nil)
   }
 
-  @objc(publishWithSessionHandle:serviceName:resolve:reject:)
+  @objc(publishWithSessionHandle:serviceName:securityMode:resolve:reject:)
   public func publish(
     sessionHandle: String,
     serviceName: String,
+    securityMode: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
     startDiscovery(
       sessionHandle: sessionHandle,
       serviceName: serviceName,
+      securityMode: securityMode,
       role: .publisher,
       resolve: resolve,
       reject: reject
     )
   }
 
-  @objc(subscribeWithSessionHandle:serviceName:resolve:reject:)
+  @objc(subscribeWithSessionHandle:serviceName:securityMode:resolve:reject:)
   public func subscribe(
     sessionHandle: String,
     serviceName: String,
+    securityMode: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
     startDiscovery(
       sessionHandle: sessionHandle,
       serviceName: serviceName,
+      securityMode: securityMode,
       role: .subscriber,
       resolve: resolve,
       reject: reject
@@ -249,12 +268,12 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     resolve(nil)
   }
 
-  @objc(openDataPathWithDiscoveryHandle:peerHandle:role:passphrase:resolve:reject:)
+  @objc(openDataPathWithDiscoveryHandle:peerHandle:role:securityMode:resolve:reject:)
   public func openDataPath(
     discoveryHandle: String,
     peerHandle: String,
     role: String,
-    passphrase: String,
+    securityMode: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
@@ -266,8 +285,8 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
       reject("INVALID_ARGUMENT", "Data-path role must be server or client", nil)
       return
     }
-    guard !passphrase.isEmpty else {
-      reject("INVALID_ARGUMENT", "A non-empty passphrase is required by the shared API", nil)
+    guard securityMode == "paired" else {
+      reject("UNSUPPORTED", "Apple Wi-Fi Aware data paths require paired security", nil)
       return
     }
 
@@ -285,6 +304,11 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     guard !discovery.closed else {
       lock.unlock()
       reject("DISCOVERY_CLOSED", "Discovery session is not live", nil)
+      return
+    }
+    guard discovery.securityMode == securityMode else {
+      lock.unlock()
+      reject("INVALID_ARGUMENT", "Data-path security must match discovery security", nil)
       return
     }
     guard discovery.role == (role == "server" ? .publisher : .subscriber) else {
@@ -385,6 +409,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
   private func startDiscovery(
     sessionHandle: String,
     serviceName: String,
+    securityMode: String,
     role: DiscoveryRole,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
@@ -395,6 +420,10 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     }
     guard !serviceName.isEmpty else {
       reject("INVALID_ARGUMENT", "A non-empty serviceName is required", nil)
+      return
+    }
+    guard securityMode == "paired" else {
+      reject("UNSUPPORTED", "Apple Wi-Fi Aware discovery requires paired security", nil)
       return
     }
     guard #available(iOS 26.0, *) else {
@@ -416,7 +445,12 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     }
 
     let handle = makeHandle("discovery")
-    let record = DiscoveryRecord(sessionHandle: sessionHandle, role: role, serviceName: serviceName)
+    let record = DiscoveryRecord(
+      sessionHandle: sessionHandle,
+      role: role,
+      serviceName: serviceName,
+      securityMode: securityMode
+    )
     lock.lock()
     guard let session = sessions[sessionHandle] else {
       lock.unlock()
@@ -504,7 +538,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
       do {
         let listener = try NetworkListener(
           for: .wifiAware(.connecting(to: service, from: .selected([device]))),
-          using: { TLS() }
+          using: { TCP() }
         ).onStateUpdate { [weak self, weak record] _, state in
           switch state {
           case .failed(let error):
@@ -564,7 +598,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
         // WAEndpoint is a Connectable, so it can create the typed Wi-Fi Aware
         // NetworkConnection directly. Keep it in this task's scope; the new
         // Network API closes it when this task ends or is cancelled.
-        let connection = NetworkConnection(to: endpoint, using: { TLS() })
+        let connection = NetworkConnection(to: endpoint, using: { TCP() })
         connection.onStateUpdate { [weak self, weak record] _, state in
           self?.handleConnectionState(state, handle: handle, record: record)
         }
@@ -593,7 +627,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
 
   @available(iOS 26.0, *)
   private func handleConnectionState(
-    _ state: NetworkChannel<TLS>.State,
+    _ state: NetworkChannel<TCP>.State,
     handle: String,
     record: DataPathRecord?
   ) {

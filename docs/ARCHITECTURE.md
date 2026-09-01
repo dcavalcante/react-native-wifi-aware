@@ -10,13 +10,16 @@ type PeerHandle = string;
 getCapabilities(): CapabilitySnapshot;
 attach(): Promise<AwareSessionHandle>;
 closeSession(handle: AwareSessionHandle): Promise<void>;
-publish(handle: AwareSessionHandle, options: { serviceName: string }): Promise<DiscoverySessionHandle>;
-subscribe(handle: AwareSessionHandle, options: { serviceName: string }): Promise<DiscoverySessionHandle>;
+publish(handle: AwareSessionHandle, options: { serviceName: string; securityMode: 'psk' | 'paired' }): Promise<DiscoverySessionHandle>;
+subscribe(handle: AwareSessionHandle, options: { serviceName: string; securityMode: 'psk' | 'paired' }): Promise<DiscoverySessionHandle>;
 presentPairing(discoverySessionHandle: DiscoverySessionHandle): Promise<void>;
 closeDiscoverySession(handle: DiscoverySessionHandle): Promise<void>;
 onPeerFound(listener): EventSubscription;
 sendMessage(discoverySessionHandle: DiscoverySessionHandle, peerHandle: PeerHandle, payload: ReadonlyArray<number>): Promise<void>;
 onMessageReceived(listener): EventSubscription;
+openDataPath(discoverySessionHandle: DiscoverySessionHandle, peerHandle: PeerHandle | undefined, options: DataPathOptions): Promise<DataPathHandle>;
+closeDataPath(handle: DataPathHandle): Promise<void>;
+onDataPathState(listener): EventSubscription;
 ```
 
 Stage 1 implements `getCapabilities()` on Android only: API 24-25 and Android devices without Wi-Fi Aware return both booleans as `false`; API 26+ separately reports feature support and current Aware availability. Stage 2 implements Android API-26+ attach/close and basic publish/subscribe. It is `IMPLEMENTED + CI_VERIFIED + PHYSICALLY_VERIFIED`: two eligible Android devices discovered each other and tore down cleanly on 2026-08-24. `onPeerFound` is subscriber-only; its peer handle is scoped to its discovery-session handle, and callbacks after closure, availability loss, or module invalidation are discarded.
@@ -43,14 +46,11 @@ Android↔Apple promise exists.
 Stage 7 provisionally maps that contract to Apple's Network framework. A
 publisher `WAPairedDevice` peer starts a `NetworkListener` restricted to that
 device; its first accepted `NetworkConnection` is the returned server path. A
-subscriber `WAEndpoint` peer starts the returned client path. Both use Apple's
-default bulk Wi-Fi Aware parameters and `TLS()` stack. The shared API keeps a
-nonempty `passphrase` because Android needs it, but Apple deliberately ignores
-that string: system pairing authenticates/encrypts the Wi-Fi link, and this
-stage neither derives nor exposes an Apple TLS-PSK. `connected`, `failed`,
-`lost`, and `closed` remain serializable events; data-path/native objects do
-not cross into JavaScript. The iOS example therefore uses pairing → publisher
-listener → subscriber client and keeps Stage-3 hello messaging Android-only.
+subscriber `WAEndpoint` peer starts the returned client path. Stage 9 uses raw
+TCP for both Apple and Android's paired mode: system pairing authenticates and
+encrypts the Wi-Fi link, while application TLS is a future transport choice.
+`connected`, `failed`, `lost`, and `closed` remain serializable events;
+data-path/native objects do not cross into JavaScript.
 
 Before a cross-platform data path is exported, its shared contract must express
 the actual pairing/security mode and common transport rather than flattening a
@@ -58,9 +58,14 @@ platform-specific credential into a universal field. The later interoperability
 abstraction stage owns this normalization and a capability/error result that is
 truthful about local support without predicting remote-device success.
 
-That contract has two intentionally distinct modes: Android's existing
+Stage 9 implements that contract with two intentionally distinct modes:
+Android's existing
 app-managed `psk` path, and a `paired` path negotiated by the operating system.
-Apple accepts only `paired`; Android can expose it only where the framework
-paired API is available. The common service identity and raw TCP path belong to
-the same abstraction. Application-level streaming or TLS is explicitly later
-transport work, not a claim made by the Wi-Fi Aware primitive.
+Apple accepts only `paired`; Android exposes it only on Android 17.2 with
+Wi-Fi Aware pairing hardware. Android paired publishers use the platform's
+responder request form and can start their server before they have a JS peer
+handle; all other paths require a peer from their discovery session. The common
+service identity and raw TCP path belong to the same abstraction.
+Application-level streaming or TLS is explicitly later transport work, not a
+claim made by the Wi-Fi Aware primitive. Compile verification does not prove
+cross-platform runtime interoperability.

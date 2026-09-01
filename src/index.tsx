@@ -12,10 +12,21 @@ export type AwareSessionHandle = string;
 export type DiscoverySessionHandle = string;
 export type PeerHandle = string;
 export type DataPathHandle = string;
-export type DiscoveryOptions = Readonly<NativeDiscoveryOptions>;
+export type DataPathSecurityMode = 'psk' | 'paired';
+export type DiscoveryOptions = Readonly<{
+  serviceName: string;
+  securityMode: DataPathSecurityMode;
+}>;
 export type DataPathRole = 'server' | 'client';
-export type DataPathOptions = Readonly<NativeDataPathOptions> &
-  Readonly<{ role: DataPathRole }>;
+export type DataPathOptions =
+  | Readonly<{
+      role: DataPathRole;
+      security: Readonly<{ mode: 'psk'; passphrase: string }>;
+    }>
+  | Readonly<{
+      role: DataPathRole;
+      security: Readonly<{ mode: 'paired' }>;
+    }>;
 export type DataPathState = 'connected' | 'failed' | 'lost' | 'closed';
 export type DataPathEvent = Readonly<
   Omit<NativeDataPathEvent, 'state'> & { state: DataPathState }
@@ -68,12 +79,13 @@ export const closeSession = (handle: AwareSessionHandle): Promise<void> =>
 export const publish = (
   handle: AwareSessionHandle,
   options: DiscoveryOptions
-): Promise<DiscoverySessionHandle> => NativeWifiAware.publish(handle, options);
+): Promise<DiscoverySessionHandle> =>
+  NativeWifiAware.publish(handle, normalizeDiscoveryOptions(options));
 export const subscribe = (
   handle: AwareSessionHandle,
   options: DiscoveryOptions
 ): Promise<DiscoverySessionHandle> =>
-  NativeWifiAware.subscribe(handle, options);
+  NativeWifiAware.subscribe(handle, normalizeDiscoveryOptions(options));
 /**
  * Presents the platform pairing UI for a live discovery role. Resolving means
  * the system UI was presented; pairing and connection are asynchronous.
@@ -96,12 +108,12 @@ export function sendMessage(
 }
 export function openDataPath(
   discoverySessionHandle: DiscoverySessionHandle,
-  peerHandle: PeerHandle,
+  peerHandle: PeerHandle | undefined,
   options: DataPathOptions
 ): Promise<DataPathHandle> {
   return NativeWifiAware.openDataPath(
     discoverySessionHandle,
-    peerHandle,
+    peerHandle ?? '',
     normalizeDataPathOptions(options)
   );
 }
@@ -159,21 +171,64 @@ function normalizeBytePayload(payload: ReadonlyArray<number>): number[] {
   return [...payload];
 }
 
-function normalizeDataPathOptions(
-  options: DataPathOptions
-): NativeDataPathOptions {
+function normalizeDiscoveryOptions(
+  options: DiscoveryOptions
+): NativeDiscoveryOptions {
   if (
     !options ||
-    (options.role !== 'server' && options.role !== 'client') ||
-    typeof options.passphrase !== 'string' ||
-    options.passphrase.length === 0
+    typeof options.serviceName !== 'string' ||
+    !options.serviceName
   ) {
     throw wifiAwareError(
       'INVALID_ARGUMENT',
-      'Data-path options require a server/client role and non-empty passphrase'
+      'Discovery options require a non-empty serviceName'
     );
   }
-  return { role: options.role, passphrase: options.passphrase };
+  if (options.securityMode !== 'psk' && options.securityMode !== 'paired') {
+    throw wifiAwareError(
+      'INVALID_ARGUMENT',
+      'Discovery securityMode must be psk or paired'
+    );
+  }
+  return {
+    serviceName: options.serviceName,
+    securityMode: options.securityMode,
+  };
+}
+
+function normalizeDataPathOptions(
+  options: DataPathOptions
+): NativeDataPathOptions {
+  if (!options || (options.role !== 'server' && options.role !== 'client')) {
+    throw wifiAwareError(
+      'INVALID_ARGUMENT',
+      'Data-path options require a server/client role'
+    );
+  }
+  if (!options.security || options.security.mode === 'paired') {
+    if (options.security?.mode !== 'paired') {
+      throw wifiAwareError(
+        'INVALID_ARGUMENT',
+        'Data-path security must be psk or paired'
+      );
+    }
+    return { role: options.role, securityMode: 'paired' };
+  }
+  if (
+    options.security.mode !== 'psk' ||
+    typeof options.security.passphrase !== 'string' ||
+    options.security.passphrase.length === 0
+  ) {
+    throw wifiAwareError(
+      'INVALID_ARGUMENT',
+      'PSK data paths require a non-empty passphrase'
+    );
+  }
+  return {
+    role: options.role,
+    securityMode: 'psk',
+    passphrase: options.security.passphrase,
+  };
 }
 
 function wifiAwareError(

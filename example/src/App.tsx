@@ -15,20 +15,14 @@ import {
   closeSession,
   getCapabilities,
   onDataPathState,
-  onMessageReceived,
   onPeerFound,
   openDataPath,
   presentPairing,
   publish,
-  sendMessage,
   subscribe,
 } from 'react-native-wifi-aware';
 
-const SERVICE_NAME =
-  Platform.OS === 'ios' ? '_rn-aware._tcp' : 'com.wifiaware.stage4';
-const HELLO_MESSAGE = [112, 105, 110, 103];
-const DATA_PATH_READY_MESSAGE = [100, 97, 116, 97, 45, 112, 97, 116, 104];
-const DATA_PATH_PASSPHRASE = 'stage4-demo-passphrase';
+const SERVICE_NAME = '_rn-aware._tcp';
 
 async function requestDiscoveryPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
@@ -58,15 +52,9 @@ export default function App() {
     discoverySessionHandle: string;
     peerHandle: string;
   } | null>(null);
-  const [messageStatus, setMessageStatus] = useState(
-    'Subscribe first, then send hello to the discovered peer.'
-  );
-  const [messageLog, setMessageLog] = useState<string[]>([]);
   const [activeDataPath, setActiveDataPath] = useState<string | null>(null);
   const [dataPathStatus, setDataPathStatus] = useState(
-    Platform.OS === 'ios'
-      ? 'Pair the devices. The publisher starts its listener, then the subscriber connects.'
-      : 'Exchange hello first. The publisher starts the server, then the subscriber connects.'
+    'Use paired discovery. The publisher starts the server, then the subscriber connects.'
   );
   const [dataPathLog, setDataPathLog] = useState<string[]>([]);
 
@@ -112,24 +100,6 @@ export default function App() {
     return () => eventSubscription.remove();
   }, []);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const eventSubscription = onMessageReceived(
-      ({ discoverySessionHandle, peerHandle, payload }) => {
-        const received = String.fromCharCode(...payload);
-        setLastPeer({ discoverySessionHandle, peerHandle });
-        setMessageLog((current) => [
-          ...current,
-          `Received from ${peerHandle}: ${received}`,
-        ]);
-        setMessageStatus(
-          'Message received. This device can now send a reply to that peer.'
-        );
-      }
-    );
-    return () => eventSubscription.remove();
-  }, []);
-
   const startDiscovery = async (mode: 'publish' | 'subscribe') => {
     if (activeSession || activeDiscovery) {
       setDiscoveryStatus(
@@ -146,32 +116,24 @@ export default function App() {
       const session = await attach();
       const discovery =
         mode === 'publish'
-          ? await publish(session, { serviceName: SERVICE_NAME })
-          : await subscribe(session, { serviceName: SERVICE_NAME });
+          ? await publish(session, {
+              serviceName: SERVICE_NAME,
+              securityMode: 'paired',
+            })
+          : await subscribe(session, {
+              serviceName: SERVICE_NAME,
+              securityMode: 'paired',
+            });
       setActiveSession(session);
       setActiveDiscovery(discovery);
       setActiveMode(mode);
       setLastPeer(null);
-      setMessageLog([]);
       setActiveDataPath(null);
       setDataPathLog([]);
       setDataPathStatus(
         mode === 'publish'
-          ? Platform.OS === 'ios'
-            ? 'Pair an Apple subscriber, then start the publisher listener.'
-            : 'Wait for subscriber hello, then start the server data path.'
-          : Platform.OS === 'ios'
-            ? 'Pair/select the Apple publisher, then wait for its listener before starting the client.'
-            : 'Discover the publisher, send hello, then wait for data-path ready.'
-      );
-      setMessageStatus(
-        mode === 'subscribe'
-          ? Platform.OS === 'ios'
-            ? 'Apple message testing is unavailable; use pairing and the client data path.'
-            : 'Waiting for a publisher peer, then send hello.'
-          : Platform.OS === 'ios'
-            ? 'Apple message testing is unavailable; pair a subscriber, then start the listener.'
-            : 'Waiting for subscriber hello; reply after it arrives.'
+          ? 'Start the publisher server. Android publishers accept paired clients without a discovered peer; Apple publishers require the paired peer to appear first.'
+          : 'Wait for the publisher peer, then start the subscriber client.'
       );
       setDiscoveryStatus(
         `${mode === 'publish' ? 'Publishing' : 'Subscribing'}: ${discovery}`
@@ -190,11 +152,17 @@ export default function App() {
       );
       return;
     }
-    if (!lastPeer) {
+    if (!activeDiscovery) {
+      setDataPathStatus('Start discovery before opening a data path.');
+      return;
+    }
+    const androidPublisherServer =
+      Platform.OS === 'android' && role === 'server';
+    if (!lastPeer && !androidPublisherServer) {
       setDataPathStatus(
         Platform.OS === 'ios'
           ? 'No eligible Apple peer is available. Complete pairing first.'
-          : 'No peer is available. Discover first; the publisher also needs subscriber hello.'
+          : 'No publisher peer is available. Discover first.'
       );
       return;
     }
@@ -206,24 +174,14 @@ export default function App() {
     }
     try {
       setDataPathStatus(`Requesting ${role} data path...`);
-      const handle = await openDataPath(
-        lastPeer.discoverySessionHandle,
-        lastPeer.peerHandle,
-        { role, passphrase: DATA_PATH_PASSPHRASE }
-      );
+      const handle = await openDataPath(activeDiscovery, lastPeer?.peerHandle, {
+        role,
+        security: { mode: 'paired' },
+      });
       setActiveDataPath(handle);
-      if (role === 'server' && Platform.OS === 'android') {
-        await sendMessage(
-          lastPeer.discoverySessionHandle,
-          lastPeer.peerHandle,
-          DATA_PATH_READY_MESSAGE
-        );
+      if (role === 'server') {
         setDataPathStatus(
-          `Server request registered: ${handle}. Readiness message acknowledged.`
-        );
-      } else if (role === 'server') {
-        setDataPathStatus(
-          `Apple publisher listener registered: ${handle}. Start the subscriber client data path.`
+          `Publisher server request registered: ${handle}. Start the subscriber client data path.`
         );
       } else {
         setDataPathStatus(`Client request registered: ${handle}.`);
@@ -267,31 +225,6 @@ export default function App() {
     }
   };
 
-  const sendHello = async () => {
-    if (Platform.OS !== 'android') {
-      setMessageStatus('Hello messaging is currently Android-only.');
-      return;
-    }
-    if (!lastPeer) {
-      setMessageStatus(
-        'No peer is available yet. Discover or receive a message first.'
-      );
-      return;
-    }
-    try {
-      setMessageStatus('Sending hello...');
-      await sendMessage(
-        lastPeer.discoverySessionHandle,
-        lastPeer.peerHandle,
-        HELLO_MESSAGE
-      );
-      setMessageStatus('Hello acknowledged by the peer.');
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      setMessageStatus(`Send failed: ${detail}`);
-    }
-  };
-
   const stopDiscovery = async () => {
     if (!activeSession || !activeDiscovery) {
       setDiscoveryStatus('No active discovery test to close.');
@@ -308,7 +241,6 @@ export default function App() {
       setLastPeer(null);
       setActiveDataPath(null);
       setDiscoveryStatus('Discovery and parent session closed.');
-      setMessageStatus('Message test closed.');
       setDataPathStatus('Data-path test closed.');
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -323,6 +255,9 @@ export default function App() {
       </Text>
       <Text style={styles.value}>
         Available: {String(capabilities.isAvailable)}
+      </Text>
+      <Text style={styles.value}>
+        Paired path: {String(capabilities.isPairedDataPathSupported)}
       </Text>
       <Text style={styles.value}>{attachStatus}</Text>
       <View style={styles.buttonList}>
@@ -349,14 +284,6 @@ export default function App() {
         <View style={styles.button}>
           <Button title="Close test" onPress={() => void stopDiscovery()} />
         </View>
-        {Platform.OS === 'android' ? (
-          <View style={styles.button}>
-            <Button
-              title="Send hello to last peer"
-              onPress={() => void sendHello()}
-            />
-          </View>
-        ) : null}
         <View style={styles.button}>
           <Button
             title="Start publisher server data path"
@@ -376,17 +303,7 @@ export default function App() {
         </View>
       </View>
       <Text style={styles.status}>{discoveryStatus}</Text>
-      {Platform.OS === 'android' ? (
-        <Text style={styles.status}>{messageStatus}</Text>
-      ) : null}
       <Text style={styles.status}>{dataPathStatus}</Text>
-      {Platform.OS === 'android'
-        ? messageLog.map((entry, index) => (
-            <Text key={`${entry}-${index}`} style={styles.log}>
-              {entry}
-            </Text>
-          ))
-        : null}
       {dataPathLog.map((entry, index) => (
         <Text key={`${entry}-${index}`} style={styles.log}>
           {entry}

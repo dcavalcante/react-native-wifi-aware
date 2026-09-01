@@ -46,6 +46,7 @@
   [[WifiAwareCoordinator shared]
       publishWithSessionHandle:handle
                    serviceName:options.serviceName()
+                 securityMode:options.securityMode()
                        resolve:resolve
                         reject:reject];
 }
@@ -58,6 +59,7 @@
   [[WifiAwareCoordinator shared]
       subscribeWithSessionHandle:handle
                      serviceName:options.serviceName()
+                   securityMode:options.securityMode()
                          resolve:resolve
                           reject:reject];
 }
@@ -98,7 +100,7 @@
       openDataPathWithDiscoveryHandle:discoverySessionHandle
                             peerHandle:peerHandle
                                  role:options.role()
-                           passphrase:options.passphrase()
+                         securityMode:options.securityMode()
                               resolve:resolve
                                reject:reject];
 }

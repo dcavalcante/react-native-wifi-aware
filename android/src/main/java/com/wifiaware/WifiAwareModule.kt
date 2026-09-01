@@ -60,6 +60,8 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   private val dataPaths = DataPathRegistry<DataPathResources>()
   private val pendingAttaches = mutableMapOf<String, Promise>()
   private val pendingDiscoveries = mutableMapOf<String, Pair<String, Promise>>()
+  @RequiresApi(26) private val pendingDiscoverySecurityModes = mutableMapOf<String, String>()
+  @RequiresApi(26) private val discoverySecurityModes = mutableMapOf<String, String>()
   private var receiverRegistered = false
 
   private data class DataPathResources(
@@ -85,7 +87,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   init { registerAvailabilityReceiver() }
 
   override fun getCapabilities(): WritableMap {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return capabilityMap(false, false)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return capabilityMap(false, false, false)
     return getCapabilitiesApi26()
   }
 
@@ -151,6 +153,8 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
           closeDataPathsForDiscovery(it, "closed", "Parent session closed")
           rejectPendingMessagesForDiscovery(it, "SESSION_CLOSED", "Session closed before message completed")
           peers.remove(it)
+          pendingDiscoverySecurityModes.remove(it)
+          discoverySecurityModes.remove(it)
         }
         discoveries.forEach { it.value.close() }
         session?.close()
@@ -200,9 +204,19 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
       promise.reject("INVALID_ARGUMENT", "A non-empty serviceName is required")
       return
     }
+    val securityMode = try { options.getString("securityMode") } catch (_: Exception) { null }
+    if (securityMode != "psk" && securityMode != "paired") {
+      promise.reject("INVALID_ARGUMENT", "Discovery securityMode must be psk or paired")
+      return
+    }
+    if (securityMode == "paired" && !isFrameworkOffloadedPairingSupported()) {
+      promise.reject("UNSUPPORTED", "Paired Wi-Fi Aware discovery requires Android 17.2 and supported Wi-Fi Aware pairing hardware")
+      return
+    }
     val discoveryHandle = newHandle("discovery")
     handles.beginDiscovery(discoveryHandle, parent)
     pendingDiscoveries[discoveryHandle] = parent to promise
+    pendingDiscoverySecurityModes[discoveryHandle] = securityMode
     val callback = object : DiscoverySessionCallback() {
       override fun onPublishStarted(discovery: PublishDiscoverySession) {
         handler.post { registerDiscovery(discoveryHandle, discovery) }
@@ -256,8 +270,15 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
       }
     }
     try {
-      if (subscriber) session.subscribe(SubscribeConfig.Builder().setServiceName(serviceName).build(), callback, handler)
-      else session.publish(PublishConfig.Builder().setServiceName(serviceName).build(), callback, handler)
+      if (subscriber) {
+        val config = SubscribeConfig.Builder().setServiceName(serviceName)
+        if (securityMode == "paired") enableFrameworkOffloadedPairing(config)
+        session.subscribe(config.build(), callback, handler)
+      } else {
+        val config = PublishConfig.Builder().setServiceName(serviceName)
+        if (securityMode == "paired") enableFrameworkOffloadedPairing(config)
+        session.publish(config.build(), callback, handler)
+      }
     } catch (error: IllegalArgumentException) {
       failDiscovery(discoveryHandle, "INVALID_ARGUMENT", "Invalid discovery configuration", error)
     } catch (error: SecurityException) {
@@ -274,6 +295,10 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
       return
     }
     peers[handle] = IdentityHashMap()
+    discoverySecurityModes[handle] = pendingDiscoverySecurityModes.remove(handle) ?: run {
+      closeDiscovery(handle)
+      return
+    }
     pendingDiscoveries.remove(handle)?.second?.resolve(handle)
   }
 
@@ -281,6 +306,8 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   private fun failDiscovery(handle: String, code: String, message: String, error: Throwable? = null) {
     handles.closeDiscovery(handle)
     peers.remove(handle)
+    pendingDiscoverySecurityModes.remove(handle)
+    discoverySecurityModes.remove(handle)
     val promise = pendingDiscoveries.remove(handle)?.second ?: return
     if (error == null) promise.reject(code, message) else promise.reject(code, message, error)
   }
@@ -307,6 +334,8 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     closeDataPathsForDiscovery(handle, "closed", "Discovery session closed")
     rejectPendingMessagesForDiscovery(handle, "DISCOVERY_CLOSED", "Discovery closed before message completed")
     peers.remove(handle)
+    discoverySecurityModes.remove(handle)
+    pendingDiscoverySecurityModes.remove(handle)
     if (closeNative) record.value.close()
   }
 
@@ -316,6 +345,8 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     closeDataPathsForDiscovery(handle, "closed", "Discovery session terminated")
     rejectPendingMessagesForDiscovery(handle, "DISCOVERY_CLOSED", "Discovery terminated before message completed")
     peers.remove(handle)
+    discoverySecurityModes.remove(handle)
+    pendingDiscoverySecurityModes.remove(handle)
     if (record == null) {
       pendingDiscoveries.remove(handle)?.second?.reject(
         "DISCOVERY_FAILED",
@@ -437,19 +468,31 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
       promise.reject(code, "Discovery session is not live")
       return
     }
-    val peer = peers[discoveryHandle]?.entries?.firstOrNull { it.value == peerHandle }?.key
-    if (peer == null) {
-      promise.reject("INVALID_HANDLE", "Peer does not belong to this discovery session")
-      return
-    }
     if (dataPaths.handlesForDiscovery(discoveryHandle).isNotEmpty()) {
       promise.reject("DATA_PATH_FAILED", "A data path is already active for this discovery session")
       return
     }
     val role = try { options.getString("role") } catch (_: Exception) { null }
+    val securityMode = try { options.getString("securityMode") } catch (_: Exception) { null }
     val passphrase = try { options.getString("passphrase") } catch (_: Exception) { null }
-    if ((role != "server" && role != "client") || passphrase.isNullOrBlank()) {
-      promise.reject("INVALID_ARGUMENT", "Data-path options require a server/client role and non-empty passphrase")
+    if (role != "server" && role != "client") {
+      promise.reject("INVALID_ARGUMENT", "Data-path options require a server/client role")
+      return
+    }
+    if (securityMode != "psk" && securityMode != "paired") {
+      promise.reject("INVALID_ARGUMENT", "Data-path securityMode must be psk or paired")
+      return
+    }
+    if (discoverySecurityModes[discoveryHandle] != securityMode) {
+      promise.reject("INVALID_ARGUMENT", "Data-path security must match discovery security")
+      return
+    }
+    if (securityMode == "psk" && passphrase.isNullOrBlank()) {
+      promise.reject("INVALID_ARGUMENT", "PSK data paths require a non-empty passphrase")
+      return
+    }
+    if (securityMode == "paired" && !isFrameworkOffloadedPairingSupported()) {
+      promise.reject("UNSUPPORTED", "Paired Wi-Fi Aware data paths require Android 17.2 and supported Wi-Fi Aware pairing hardware")
       return
     }
     if (role == "server" && discovery !is PublishDiscoverySession) {
@@ -458,6 +501,12 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     }
     if (role == "client" && discovery !is SubscribeDiscoverySession) {
       promise.reject("INVALID_ARGUMENT", "The data-path client must use a subscriber discovery session")
+      return
+    }
+    val peer = peers[discoveryHandle]?.entries?.firstOrNull { it.value == peerHandle }?.key
+    val pairedPublisherServer = role == "server" && securityMode == "paired"
+    if (peer == null && !pairedPublisherServer) {
+      promise.reject("INVALID_HANDLE", "Peer does not belong to this discovery session")
       return
     }
     val connectivity = reactApplicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -498,14 +547,18 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     dataPaths.begin(handle, discoveryHandle)
     dataPaths.complete(handle, resources)
     val request = try {
-      val specifier = WifiAwareNetworkSpecifier.Builder(discovery, peer)
-        .setPskPassphrase(passphrase)
-        .apply {
+      val specifierBuilder = (if (pairedPublisherServer) {
+        WifiAwareNetworkSpecifier.Builder(discovery as PublishDiscoverySession)
+      } else {
+        WifiAwareNetworkSpecifier.Builder(discovery, peer!!)
+      }).apply {
+          if (securityMode == "psk") setPskPassphrase(passphrase!!)
           if (role == "server") {
             setPort(serverSocket!!.localPort)
             setTransportProtocol(TCP_PROTOCOL)
           }
         }
+      val specifier = specifierBuilder
         .build()
       NetworkRequest.Builder()
         .addTransportType(NetworkCapabilities.TRANSPORT_WIFI_AWARE)
@@ -736,6 +789,7 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
     pendingDiscoveries.values.forEach { it.second.reject(code, message) }
     pendingMessages.invalidate().forEach { it.value.reject(code, message) }
     pendingAttaches.clear(); pendingDiscoveries.clear()
+    pendingDiscoverySecurityModes.clear(); discoverySecurityModes.clear()
     if (emitDataPathEvents) {
       dataPaths.handles().forEach { retireDataPath(it, "lost", message) }
     } else {
@@ -765,12 +819,50 @@ class WifiAwareModule(reactContext: ReactApplicationContext) : NativeWifiAwareSp
   private fun getCapabilitiesApi26(): WritableMap {
     val supported = reactApplicationContext.packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
     val manager = reactApplicationContext.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager
-    return capabilityMap(supported, supported && manager?.isAvailable == true)
+    return capabilityMap(
+      supported,
+      supported && manager?.isAvailable == true,
+      supported && isFrameworkOffloadedPairingSupported(manager),
+    )
   }
 
-  private fun capabilityMap(isSupported: Boolean, isAvailable: Boolean): WritableMap = Arguments.createMap().apply {
+  private fun capabilityMap(
+    isSupported: Boolean,
+    isAvailable: Boolean,
+    isPairedDataPathSupported: Boolean,
+  ): WritableMap = Arguments.createMap().apply {
     putBoolean("isSupported", isSupported)
     putBoolean("isAvailable", isAvailable)
+    putBoolean("isPairedDataPathSupported", isPairedDataPathSupported)
+  }
+
+  @RequiresApi(26)
+  private fun isFrameworkOffloadedPairingSupported(
+    suppliedManager: WifiAwareManager? = null,
+  ): Boolean {
+    if (Build.VERSION.SDK_INT < 37 || Build.VERSION.SDK_INT_FULL < Build.VERSION_CODES_FULL.CINNAMON_BUN_2) {
+      return false
+    }
+    val manager = suppliedManager
+      ?: reactApplicationContext.getSystemService(Context.WIFI_AWARE_SERVICE) as? WifiAwareManager
+      ?: return false
+    return try {
+      manager.characteristics?.isAwarePairingSupported == true
+    } catch (_: SecurityException) {
+      false
+    } catch (_: RuntimeException) {
+      false
+    }
+  }
+
+  @RequiresApi(37)
+  private fun enableFrameworkOffloadedPairing(config: PublishConfig.Builder) {
+    config.setFrameworkOffloadedPairingEnabled(true)
+  }
+
+  @RequiresApi(37)
+  private fun enableFrameworkOffloadedPairing(config: SubscribeConfig.Builder) {
+    config.setFrameworkOffloadedPairingEnabled(true)
   }
 
   companion object {

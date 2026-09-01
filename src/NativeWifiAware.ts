@@ -9,10 +9,18 @@ type EventEmitter<T> = (listener: (event: T) => void) => EventSubscription;
 export type NativeCapabilities = {
   isSupported: boolean;
   isAvailable: boolean;
+  isPairedDataPathSupported: boolean;
 };
 
-export type NativeDiscoveryOptions = { serviceName: string };
-export type NativeDataPathOptions = { role: string; passphrase: string };
+export type NativeDiscoveryOptions = {
+  serviceName: string;
+  securityMode: string;
+};
+export type NativeDataPathOptions = {
+  role: string;
+  securityMode: string;
+  passphrase?: string;
+};
 export type NativeAwareEvent = {
   eventType: string;
   discoverySessionHandle: string;
