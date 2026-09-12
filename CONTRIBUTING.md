@@ -75,7 +75,20 @@ To fix formatting errors, run the following:
 yarn lint --fix
 ```
 
+## iOS physical-device validation
 
+The Apple implementation still needs broader physical-device validation. If you have an Apple Developer account and supported iPhone or iPad hardware, validation reports are valuable even when you do not plan to change the code.
+
+Use the **iOS validation report** issue template when reporting results. Please include:
+
+- the library version, branch, or commit tested;
+- Apple device model and iOS/iPadOS version;
+- the peer device and OS/API level, when applicable;
+- whether you tested iOS-to-iOS or Android-to-iOS behavior;
+- the exact steps performed and whether they passed, failed, or partially passed;
+- relevant Xcode, device-console, Metro, or native logs for failures.
+
+Do not include signing certificates, private keys, provisioning profiles, account identifiers, or other secrets in reports.
 
 ### Scripts
 
@@ -83,8 +96,8 @@ The `package.json` file contains various scripts for common tasks:
 
 - `yarn`: setup project by installing dependencies.
 - `yarn typecheck`: type-check files with TypeScript.
-  - `yarn lint`: lint files with [ESLint](https://eslint.org/).
-    - `yarn example start`: start the Metro server for the example app.
+- `yarn lint`: lint files with [ESLint](https://eslint.org/).
+- `yarn example start`: start the Metro server for the example app.
 - `yarn example android`: run the example app on Android.
 - `yarn example ios`: run the example app on iOS.
   
