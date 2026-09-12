@@ -1,0 +1,108 @@
+name: iOS validation report
+description: Report physical-device validation results for the iOS/iPadOS Wi-Fi Aware implementation.
+title: "[iOS validation]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping validate the Apple implementation.
+
+        Physical-device results are especially useful because the Wi-Fi Aware implementation cannot be fully validated in the simulator. Please include enough detail for failures to be reproduced.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I tested on a physical iPhone or iPad.
+          required: true
+        - label: The app was signed with an Apple Developer account and the required Wi-Fi Aware entitlement.
+          required: true
+        - label: I declared the tested service in `WiFiAwareServices` in the host app's `Info.plist`.
+          required: true
+
+  - type: input
+    id: library-version
+    attributes:
+      label: Library version or commit
+      description: npm version, tag, branch, or commit SHA used for the test.
+      placeholder: e.g. 0.1.0-alpha.1 or abc1234
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Apple device
+      placeholder: e.g. iPhone 15 Pro
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: iOS/iPadOS version
+      placeholder: e.g. iOS 26.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scenario
+    attributes:
+      label: Test scenario
+      options:
+        - iOS/iPadOS → iOS/iPadOS discovery and pairing
+        - iOS/iPadOS → iOS/iPadOS network connection
+        - Android → iOS/iPadOS interoperability
+        - iOS/iPadOS → Android interoperability
+        - Capability detection only
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: peer-device
+    attributes:
+      label: Peer device
+      description: Device model and OS/API level of the other device, if applicable.
+      placeholder: e.g. iPhone 14 / iOS 26.0 or Pixel 9 / Android 17
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps performed
+      description: Describe the exact sequence you used so the result can be reproduced.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Passed
+        - Failed
+        - Partially passed
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: What happened? Include errors, unexpected behavior, or where the flow stopped.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste relevant Metro, Xcode, device-console, or native logs. Remove secrets or identifying information first.
+      render: shell
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional notes
+      description: Entitlement details, service names, networking observations, screenshots, or anything else that may help.

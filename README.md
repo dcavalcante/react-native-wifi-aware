@@ -1,8 +1,8 @@
 # react-native-wifi-aware
 
-An open-source React Native library for a modern, capability-aware Wi-Fi Aware (NAN) abstraction.
+A React Native implementation of Wi-Fi Aware, also known as Neighbor Awareness Networking (NAN), for peer-to-peer discovery and communication on Android and iOS.
 
-The project uses a TypeScript TurboModule API with Kotlin on Android and an Objective-C++ bridge for a future Apple implementation. It supports bare React Native; Expo development builds can consume native code, while Expo Go cannot.
+Wi-Fi Aware lets compatible nearby devices discover each other and establish direct connections without joining the same Wi-Fi network or relying on internet connectivity. That makes it useful for offline collaboration, local multiplayer, device-to-device transfer, companion apps, nearby messaging, and other experiences that should work without cloud infrastructure.
 
 ## Status
 
@@ -18,13 +18,32 @@ Apple-compatible connection. See the [roadmap](docs/ROADMAP.md),
 [architecture](docs/ARCHITECTURE.md), and [research notes](docs/README.md)
 before relying on it.
 
-## Installation
+## Help test iOS and interoperability
 
+The iOS implementation still needs physical-device validation. If you have an
+Apple Developer account and supported hardware running iOS or iPadOS 26+, your
+test results would be especially useful.
+
+Current validation goals are:
+
+- iOS-to-iOS discovery and pairing
+- iOS-to-iOS network connections
+- documenting runtime differences or failures that do not appear in simulator builds
+- Android-to-iOS interoperability once the Android framework-paired path is available
+
+To help, clone the repository, run the example app on physical Apple devices,
+configure the required Wi-Fi Aware entitlements and `WiFiAwareServices` entries,
+and report the exact devices, OS versions, test flow, result, and relevant native
+logs in a GitHub issue. Reproduction details and focused pull requests are welcome.
+
+The Apple path should currently be treated as provisional until those physical
+validation gates are complete.
+
+## Installation
 
 ```sh
 npm install react-native-wifi-aware
 ```
-
 
 Native Android permissions supplied by the library merge into the consuming app. Platform availability remains a runtime capability question.
 
@@ -72,7 +91,6 @@ yarn prepare
 ```
 
 The example app lives in `example/`. For Android device testing, start Metro with `yarn example start`, ensure `adb reverse tcp:8081 tcp:8081` for a USB-connected device, then run `yarn example android`.
-
 
 ## Contributing
 
