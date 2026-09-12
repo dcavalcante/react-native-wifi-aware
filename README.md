@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/logo.svg" alt="react-native-wifi-aware logo" width="240" />
+</p>
+
 # react-native-wifi-aware
 
 An open-source React Native library for a modern, capability-aware Wi-Fi Aware (NAN) abstraction.
