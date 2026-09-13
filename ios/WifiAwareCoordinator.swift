@@ -28,6 +28,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     let serviceName: String
     var closed = false
     var peers = [String: Any]()
+    var pairedPeerHandles = [UInt64: String]()
     var tasks = [Task<Void, Never>]()
     weak var pairingController: UIViewController?
 
@@ -218,7 +219,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
         controller.modalPresentationStyle = .fullScreen
         record.pairingController = controller
         presenter.present(controller, animated: true) { resolve(nil) }
-        Task { [weak self, weak record] in
+        let task = Task { [weak self, weak record] in
           do {
             let endpoint = try await controller.endpoint
             guard let self, let record, !record.closed else { return }
@@ -228,6 +229,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
             // Cancellation is a user action, not a failed discovery session.
           }
         }
+        self.retainDiscoveryTask(task, for: discoveryHandle, record: record)
       }
     }
   }
@@ -307,16 +309,17 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     dataPaths[handle] = dataPath
     lock.unlock()
 
+    let task: Task<Void, Never>
     switch (role, peer) {
     case ("server", let device as WAPairedDevice):
-      dataPath.task = startServerDataPath(
+      task = startServerDataPath(
         handle: handle,
         record: dataPath,
         serviceName: serviceName,
         device: device
       )
     case ("client", let endpoint as WAEndpoint):
-      dataPath.task = startClientDataPath(handle: handle, record: dataPath, endpoint: endpoint)
+      task = startClientDataPath(handle: handle, record: dataPath, endpoint: endpoint)
     default:
       removeUnstartedDataPath(handle, record: dataPath)
       reject(
@@ -328,6 +331,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
       )
       return
     }
+    retainDataPathTask(task, handle: handle, record: dataPath)
     resolve(handle)
   }
 
@@ -362,6 +366,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
       $0.tasks.forEach { $0.cancel() }
       $0.tasks.removeAll()
       $0.peers.removeAll()
+      $0.pairedPeerHandles.removeAll()
     }
     sessions.removeAll()
     discoveries.removeAll()
@@ -455,13 +460,13 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
           guard let self, let record, !record.closed else { return }
           self.registerPeer(endpoint, for: discoveryHandle, record: record)
         }
+      } catch is CancellationError {
+        // Parent teardown intentionally ends the browser task.
       } catch {
-        // The public contract has no discovery-state event. Closing a parent
-        // invalidates this task; physical validation will determine whether a
-        // stable surface for runtime browser errors is needed.
+        self?.logDiscoveryFailure(error, operation: "subscriber browser", handle: discoveryHandle)
       }
     }
-    record.tasks.append(task)
+    retainDiscoveryTask(task, for: discoveryHandle, record: record)
   }
 
   @available(iOS 26.0, *)
@@ -472,15 +477,18 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
         for try await devices in WAPairedDevice.allDevices {
           DispatchQueue.main.async {
             guard let self, let record, !record.closed else { return }
-            devices.values.forEach { self.registerPeer($0, for: discoveryHandle, record: record) }
+            devices.values.forEach {
+              self.registerPairedDevice($0, for: discoveryHandle, record: record)
+            }
           }
         }
+      } catch is CancellationError {
+        // Parent teardown intentionally ends paired-device observation.
       } catch {
-        // A later physical gate distinguishes a denied entitlement from a
-        // transient paired-device change; no peer event is emitted on failure.
+        self?.logDiscoveryFailure(error, operation: "paired-device observer", handle: discoveryHandle)
       }
     }
-    record.tasks.append(task)
+    retainDiscoveryTask(task, for: discoveryHandle, record: record)
   }
 
   @available(iOS 26.0, *)
@@ -703,6 +711,65 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     lock.unlock()
   }
 
+  private func retainDiscoveryTask(
+    _ task: Task<Void, Never>,
+    for discoveryHandle: String,
+    record: DiscoveryRecord
+  ) {
+    lock.lock()
+    guard discoveries[discoveryHandle] === record, !record.closed else {
+      lock.unlock()
+      task.cancel()
+      return
+    }
+    record.tasks.append(task)
+    lock.unlock()
+  }
+
+  private func retainDataPathTask(
+    _ task: Task<Void, Never>,
+    handle: String,
+    record: DataPathRecord
+  ) {
+    lock.lock()
+    guard dataPaths[handle] === record, !record.terminal else {
+      lock.unlock()
+      task.cancel()
+      return
+    }
+    record.task = task
+    lock.unlock()
+  }
+
+  @available(iOS 26.0, *)
+  private func registerPairedDevice(
+    _ device: WAPairedDevice,
+    for discoveryHandle: String,
+    record: DiscoveryRecord
+  ) {
+    let handle = makeHandle("peer")
+    lock.lock()
+    guard discoveries[discoveryHandle] === record, !record.closed else {
+      lock.unlock()
+      return
+    }
+    if record.pairedPeerHandles[device.id] != nil {
+      lock.unlock()
+      return
+    }
+    record.pairedPeerHandles[device.id] = handle
+    record.peers[handle] = device
+    let sink = eventSink
+    lock.unlock()
+
+    sink?([
+      "eventType": "peerFound",
+      "discoverySessionHandle": discoveryHandle,
+      "peerHandle": handle,
+      "payload": [],
+    ])
+  }
+
   private func registerPeer(_ peer: Any, for discoveryHandle: String, record: DiscoveryRecord) {
     let handle = makeHandle("peer")
     lock.lock()
@@ -726,6 +793,14 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     ])
   }
 
+  private func logDiscoveryFailure(_ error: Error, operation: String, handle: String) {
+    lock.lock()
+    let isLive = discoveries[handle].map { !$0.closed } ?? false
+    lock.unlock()
+    guard isLive else { return }
+    NSLog("[react-native-wifi-aware] Apple %@ failed for %@: %@", operation, handle, String(describing: error))
+  }
+
   private func closeDiscovery(_ handle: String) {
     let tasks: [Task<Void, Never>]
     lock.lock()
@@ -737,6 +812,7 @@ public final class WifiAwareCoordinator: NSObject, @unchecked Sendable {
     tasks = record.tasks
     record.tasks.removeAll()
     record.peers.removeAll()
+    record.pairedPeerHandles.removeAll()
     sessions[record.sessionHandle]?.discoveries.remove(handle)
     lock.unlock()
 
